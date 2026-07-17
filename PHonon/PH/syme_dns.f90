@@ -174,3 +174,92 @@ SUBROUTINE syme_dns (ldim, npe, dns)
   !
 END SUBROUTINE syme_dns
 !---------------------------------------------------------------------
+
+!---------------------------------------------------------------------
+SUBROUTINE syme_dns_nc(ldim, npe, dns)
+  !-------------------------------------------------------------------
+  !! Symmetrize the noncollinear Hubbard occupation response to a
+  !! homogeneous electric field.  The electric perturbation is a polar
+  !! vector, while the Hubbard matrix is rotated jointly in orbital and
+  !! spin space.
+  !
+  USE kinds,        ONLY : DP
+  USE ions_base,    ONLY : nat, ityp
+  USE ldaU,         ONLY : Hubbard_l, is_hubbard, d_spin_ldau
+  USE symm_base,    ONLY : d1, d2, d3, nsym, irt, s, t_rev
+  USE hubbard_nc_response, ONLY : hubbard_rotate_nc, hubbard_adjoint_nc, &
+                                  hubbard_spin_inverse_nc
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: ldim, npe
+  COMPLEX(DP), INTENT(INOUT) :: dns(ldim,ldim,4,nat,npe)
+  !
+  INTEGER :: isym, ip, jp, na, nb, nt, ldim_nt
+  REAL(DP) :: dorb(ldim,ldim)
+  COMPLEX(DP) :: dspin_inv(2,2)
+  COMPLEX(DP) :: block_in(ldim,ldim,4), block_out(ldim,ldim,4)
+  COMPLEX(DP), ALLOCATABLE :: dnr(:,:,:,:,:), dnraux(:,:,:,:,:)
+  COMPLEX(DP), ALLOCATABLE :: adjoint(:,:,:,:)
+  !
+  ALLOCATE(dnr(ldim,ldim,4,nat,npe), dnraux(ldim,ldim,4,nat,npe))
+  ALLOCATE(adjoint(ldim,ldim,4,nat))
+  dnr = dns
+  !
+  ! A static electric perturbation produces a Hermitian occupation response.
+  ! Enforce this before the unitary space-group average.
+  !
+  DO ip = 1, npe
+     CALL hubbard_adjoint_nc(ldim, nat, dnr(:,:,:,:,ip), adjoint)
+     dnr(:,:,:,:,ip) = 0.5_DP * (dnr(:,:,:,:,ip) + adjoint)
+  END DO
+  !
+  dnraux = (0.0_DP, 0.0_DP)
+  DO isym = 1, nsym
+     IF (t_rev(isym) /= 0) CALL errore('syme_dns_nc', &
+          'antiunitary electric-field symmetry is outside the supported scope', 1)
+     DO ip = 1, npe
+        DO na = 1, nat
+           nt = ityp(na)
+           IF (.NOT. is_hubbard(nt)) CYCLE
+           nb = irt(isym,na)
+           ldim_nt = 2 * Hubbard_l(nt) + 1
+           dorb = 0.0_DP
+           SELECT CASE(Hubbard_l(nt))
+           CASE(0)
+              dorb(1,1) = 1.0_DP
+           CASE(1)
+              dorb(1:ldim_nt,1:ldim_nt) = &
+                   TRANSPOSE(d1(1:ldim_nt,1:ldim_nt,isym))
+           CASE(2)
+              dorb(1:ldim_nt,1:ldim_nt) = &
+                   TRANSPOSE(d2(1:ldim_nt,1:ldim_nt,isym))
+           CASE(3)
+              dorb(1:ldim_nt,1:ldim_nt) = &
+                   TRANSPOSE(d3(1:ldim_nt,1:ldim_nt,isym))
+           CASE DEFAULT
+              CALL errore('syme_dns_nc','angular momentum not implemented', &
+                   ABS(Hubbard_l(nt)))
+           END SELECT
+           CALL hubbard_spin_inverse_nc(d_spin_ldau(:,:,isym), dspin_inv)
+           DO jp = 1, npe
+              block_in = (0.0_DP, 0.0_DP)
+              block_in(1:ldim_nt,1:ldim_nt,:) = &
+                   dnr(1:ldim_nt,1:ldim_nt,:,nb,jp)
+              CALL hubbard_rotate_nc(ldim_nt, &
+                   dorb(1:ldim_nt,1:ldim_nt), dspin_inv, &
+                   block_in(1:ldim_nt,1:ldim_nt,:), &
+                   block_out(1:ldim_nt,1:ldim_nt,:))
+              dnraux(1:ldim_nt,1:ldim_nt,:,na,ip) = &
+                   dnraux(1:ldim_nt,1:ldim_nt,:,na,ip) + &
+                   s(ip,jp,isym) * block_out(1:ldim_nt,1:ldim_nt,:) / &
+                   REAL(nsym,DP)
+           END DO
+        END DO
+     END DO
+  END DO
+  dns = dnraux
+  !
+  DEALLOCATE(dnr, dnraux, adjoint)
+  !
+END SUBROUTINE syme_dns_nc
+!---------------------------------------------------------------------

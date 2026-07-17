@@ -55,7 +55,7 @@ SUBROUTINE commutator_Vhubx_psi(ik, nbnd_calc, vpol, dpsi)
   !! Number of bands to calculate [V_hub, x_ipol]|psi_ik>
   REAL(DP), INTENT(IN) :: vpol(3)
   !! Polarization vector in Cartesian coordinates
-  COMPLEX(DP), INTENT(OUT) :: dpsi(npwx*npol, nbnd_calc)
+  COMPLEX(DP), INTENT(INOUT) :: dpsi(npwx*npol, nbnd_calc)
   !! Output wavefunction where [V_hub, x_ipol]|psi_ik> is added
   !
   REAL(DP), PARAMETER :: eps = 1.0d-8
@@ -69,6 +69,10 @@ SUBROUTINE commutator_Vhubx_psi(ik, nbnd_calc, vpol, dpsi)
                  dpqq26(:,:), dpqq38(:,:), dpqq47(:,:), dkvkbbessel(:,:),          &
                  dkvkbylmr(:,:), dkvkb(:,:), aux_1234(:), termi(:,:), trm(:,:),    &
                  wfcatomk(:,:), swfcatomk(:,:), proj1(:,:), proj2(:,:), proj3(:,:)
+  IF (noncolin) THEN
+     CALL commutator_Vhubx_psi_nc(ik, nbnd_calc, vpol, dpsi)
+     RETURN
+  ENDIF
   CALL start_clock( 'commutator_Vhubx_psi' )
   !
   ! Number of plane waves at point ik
@@ -403,6 +407,156 @@ SUBROUTINE commutator_Vhubx_psi(ik, nbnd_calc, vpol, dpsi)
   !
 END SUBROUTINE commutator_Vhubx_psi
 
+!-----------------------------------------------------------------------
+SUBROUTINE commutator_Vhubx_psi_nc(ik, nbnd_calc, vpol, dpsi)
+  !---------------------------------------------------------------------
+  !! Noncollinear, norm-conserving Dudarev contribution to
+  !! [V_hub, r.vpol]|psi>.  Hubbard orbitals and their k derivatives are
+  !! represented as full spinors in the uu, ud, du, dd convention.
+  !
+  USE kinds,            ONLY : DP
+  USE io_files,         ONLY : iunhub, nwordwfcU
+  USE wavefunctions,    ONLY : evc
+  USE wvfct,            ONLY : npwx
+  USE ions_base,        ONLY : nat, ityp
+  USE ldaU,             ONLY : Hubbard_l, is_hubbard, nwfcU, offsetU, oatwfc
+  USE uspp,             ONLY : okvan
+  USE klist,            ONLY : xk, wk, ngk, igk_k
+  USE cell_base,        ONLY : tpiba
+  USE gvect,            ONLY : g
+  USE scf,              ONLY : v
+  USE basis,            ONLY : natomwfc
+  USE buffers,          ONLY : get_buffer
+  USE mp,               ONLY : mp_sum
+  USE mp_pools,         ONLY : intra_pool_comm
+  USE noncollin_module, ONLY : npol
+  USE lsda_mod,         ONLY : nspin
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: ik, nbnd_calc
+  REAL(DP), INTENT(IN) :: vpol(3)
+  COMPLEX(DP), INTENT(INOUT) :: dpsi(npwx*npol,nbnd_calc)
+  !
+  INTEGER :: na, nt, ldim_nt, m1, m2, is1, is2, is
+  INTEGER :: ia, ib, iat, ibnd, ig, iig, npw, irec
+  REAL(DP) :: g2k, gk_ig(3)
+  REAL(DP), ALLOCATABLE :: gk_vpol(:)
+  COMPLEX(DP) :: coeff
+  COMPLEX(DP), ALLOCATABLE :: dkwfcbessel(:,:), dkwfcylmr(:,:)
+  COMPLEX(DP), ALLOCATABLE :: dkwfcU(:,:), swfcatomk(:,:)
+  COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:)
+  !
+  CALL start_clock('commutator_Vhubx_psi')
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('commutator_Vhubx_psi_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  IF (okvan) CALL errore('commutator_Vhubx_psi_nc', &
+       'noncollinear DFPT+U electric response supports NC pseudopotentials only', 1)
+  !
+  npw = ngk(ik)
+  ALLOCATE(gk_vpol(npw))
+  ALLOCATE(dkwfcbessel(npwx*npol,natomwfc))
+  ALLOCATE(dkwfcylmr(npwx*npol,natomwfc))
+  ALLOCATE(dkwfcU(npwx*npol,nwfcU), swfcatomk(npwx*npol,nwfcU))
+  ALLOCATE(proj(nbnd_calc,nwfcU), dproj(nbnd_calc,nwfcU))
+  !
+  ! PH stores only the positive-weight representatives in this Gamma-point
+  ! buffer; magnetic auxiliary -k points have zero weight.
+  irec = COUNT(ABS(wk(1:ik)) > 1.0D-14)
+  IF (irec < 1) irec = ik
+  CALL get_buffer(swfcatomk, nwordwfcU, iunhub, irec)
+  CALL gen_at_dj(ik, dkwfcbessel)
+  CALL gen_at_dy(ik, vpol, dkwfcylmr)
+  !
+  DO ig = 1, npw
+     iig = igk_k(ig,ik)
+     gk_ig = (xk(:,ik) + g(:,iig)) * tpiba
+     g2k = SUM(gk_ig**2)
+     IF (g2k < 1.0D-10) THEN
+        gk_vpol(ig) = 0.0_DP
+     ELSE
+        gk_vpol(ig) = DOT_PRODUCT(vpol,gk_ig) / SQRT(g2k)
+     ENDIF
+  END DO
+  !
+  dkwfcU = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is1 = 1, 2
+        DO m1 = 1, ldim_nt
+           ia = offsetU(na) + m1 + ldim_nt*(is1-1)
+           iat = oatwfc(na) + m1 + ldim_nt*(is1-1)
+           DO ig = 1, npw
+              dkwfcU(ig,ia) = dkwfcylmr(ig,iat) + &
+                   dkwfcbessel(ig,iat) * gk_vpol(ig)
+              dkwfcU(npwx+ig,ia) = dkwfcylmr(npwx+ig,iat) + &
+                   dkwfcbessel(npwx+ig,iat) * gk_vpol(ig)
+           END DO
+        END DO
+     END DO
+  END DO
+  !
+  proj = (0.0_DP, 0.0_DP)
+  dproj = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is1 = 1, 2
+        DO m1 = 1, ldim_nt
+           ia = offsetU(na) + m1 + ldim_nt*(is1-1)
+           DO ibnd = 1, nbnd_calc
+              proj(ibnd,ia) = DOT_PRODUCT(swfcatomk(1:npw,ia), &
+                   evc(1:npw,ibnd)) + &
+                   DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ia), &
+                   evc(npwx+1:npwx+npw,ibnd))
+              dproj(ibnd,ia) = DOT_PRODUCT(dkwfcU(1:npw,ia), &
+                   evc(1:npw,ibnd)) + &
+                   DOT_PRODUCT(dkwfcU(npwx+1:npwx+npw,ia), &
+                   evc(npwx+1:npwx+npw,ibnd))
+           END DO
+        END DO
+     END DO
+  END DO
+  CALL mp_sum(proj, intra_pool_comm)
+  CALL mp_sum(dproj, intra_pool_comm)
+  !
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is1 = 1, 2
+        DO is2 = 1, 2
+           is = 2 * (is1 - 1) + is2
+           DO m1 = 1, ldim_nt
+              ia = offsetU(na) + m1 + ldim_nt*(is1-1)
+              DO m2 = 1, ldim_nt
+                 ib = offsetU(na) + m2 + ldim_nt*(is2-1)
+                 coeff = CMPLX(0.0_DP,-1.0_DP,kind=DP) * &
+                      v%ns_nc(m1,m2,is,na)
+                 DO ibnd = 1, nbnd_calc
+                    DO ig = 1, npw
+                       dpsi(ig,ibnd) = dpsi(ig,ibnd) + coeff * &
+                            (dkwfcU(ig,ia) * proj(ibnd,ib) + &
+                             swfcatomk(ig,ia) * dproj(ibnd,ib))
+                       dpsi(npwx+ig,ibnd) = dpsi(npwx+ig,ibnd) + coeff * &
+                            (dkwfcU(npwx+ig,ia) * proj(ibnd,ib) + &
+                             swfcatomk(npwx+ig,ia) * dproj(ibnd,ib))
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  !
+  DEALLOCATE(gk_vpol, dkwfcbessel, dkwfcylmr, dkwfcU, swfcatomk)
+  DEALLOCATE(proj, dproj)
+  CALL stop_clock('commutator_Vhubx_psi')
+  !
+END SUBROUTINE commutator_Vhubx_psi_nc
+
 SUBROUTINE vecqqproj (npw, vec1, vec2, vec3, dpqq)
     !
     ! Calculate dpqq (ig) = \sum {na l1 l2} vec1(ig ,na,l1)
@@ -470,4 +624,3 @@ SUBROUTINE vecqqproj (npw, vec1, vec2, vec3, dpqq)
     RETURN
     !
 END SUBROUTINE vecqqproj
-

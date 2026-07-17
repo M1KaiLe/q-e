@@ -156,6 +156,11 @@ PROGRAM test_hubbard_nc_response
   CALL hubbard_adjoint_nc(ldim,nat,a,b)
   CALL check_array(b,dns,'adjoint squared',failures)
 
+  CALL hubbard_adjoint_nc(ldim,nat,dns,a)
+  b = 0.5_DP * (dns + a)
+  CALL hubbard_adjoint_nc(ldim,nat,b,a)
+  CALL check_array(a,b,'electric-field Hermitian completion',failures)
+
   r1 = dns(:,:,:,1)
   d1 = 0.0_DP
   d1(1,1) = 1.0_DP

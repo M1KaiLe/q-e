@@ -313,10 +313,11 @@ END SUBROUTINE dnsq_scf
 !----------------------------------------------------------------------------
 SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   !----------------------------------------------------------------------------
-  !! Noncollinear response of the Hubbard occupation matrix.  A magnetic
-  !! calculation combines direct and -B Sternheimer solutions.  A
-  !! time-reversal-symmetric calculation obtains both bra/ket halves from the
-  !! direct solution, following HP/src/hp_dnsq.f90.
+  !! Noncollinear response of the Hubbard occupation matrix.  A finite-q
+  !! magnetic phonon combines direct and -B Sternheimer solutions.  The
+  !! q=0 electric-field response is completed by its Hermitian adjoint.
+  !! A time-reversal-symmetric calculation obtains the complementary half
+  !! from the Kramers partner of the direct solution.
   !
   USE kinds,         ONLY : DP
   USE io_files,      ONLY : nwordwfcU
@@ -342,7 +343,8 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   USE control_flags, ONLY : iverbosity
   USE io_global,     ONLY : stdout
   USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_branch_indices_nc, &
-                                  hubbard_kramers_indices_nc
+                                  hubbard_kramers_indices_nc, &
+                                  hubbard_adjoint_nc
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: npe, imode0, irr
@@ -356,18 +358,18 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   REAL(DP) :: wdelta, w1
   COMPLEX(DP), ALLOCATABLE :: dpsi(:,:), proj1(:,:), proj2(:,:)
   COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:)
+  COMPLEX(DP), ALLOCATABLE :: dns_adjoint(:,:,:,:)
   REAL(DP), EXTERNAL :: w0gauss
   !
-  IF (.NOT. lflag) CALL errore('dnsq_scf_nc', &
-       'electric-field response is outside the noncollinear DFPT+U scope', 1)
   IF (npol /= 2 .OR. nspin /= 4) CALL errore('dnsq_scf_nc', &
        'inconsistent noncollinear spin dimensions', 1)
   !
   ldim = 2 * Hubbard_lmax + 1
   ALLOCATE(dpsi(npwx*npol,nbnd), proj1(nbnd,nwfcU), proj2(nbnd,nwfcU))
   ALLOCATE(dns_branch(ldim,ldim,4,nat,npe))
+  ALLOCATE(dns_adjoint(ldim,ldim,4,nat))
   dnsscf = (0.0_DP, 0.0_DP)
-  nsolv = MERGE(2, 1, domag)
+  nsolv = MERGE(2, 1, domag .AND. lflag)
   !
   DO isolv = 1, nsolv
      dns_branch = (0.0_DP, 0.0_DP)
@@ -478,10 +480,22 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
         END DO
       END DO
       CALL mp_sum(dns_branch, inter_pool_comm)
+      IF (domag .AND. .NOT. lflag) THEN
+         DO ipert = 1, npe
+            CALL hubbard_adjoint_nc(ldim, nat, &
+                 dns_branch(:,:,:,:,ipert), dns_adjoint)
+            dns_branch(:,:,:,:,ipert) = &
+                 dns_branch(:,:,:,:,ipert) + dns_adjoint
+         END DO
+      ENDIF
       dnsscf = dnsscf + dns_branch
    END DO
    !
-  CALL sym_dns_nc(ldim, npe, irr, dnsscf)
+  IF (lflag) THEN
+     CALL sym_dns_nc(ldim, npe, irr, dnsscf)
+  ELSE
+     CALL syme_dns_nc(ldim, npe, dnsscf)
+  ENDIF
   !
   DO ipert = 1, npe
      DO nah = 1, nat
@@ -501,6 +515,6 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   IF (iverbosity == 1) THEN
      WRITE(stdout,'(5x,a)') 'DNSSCF NONCOLLINEAR SPIN BLOCKS: uu, ud, du, dd'
   ENDIF
-  DEALLOCATE(dns_branch, dpsi, proj1, proj2)
+  DEALLOCATE(dns_branch, dns_adjoint, dpsi, proj1, proj2)
 END SUBROUTINE dnsq_scf_nc
 !----------------------------------------------------------------------------

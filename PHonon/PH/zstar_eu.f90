@@ -18,7 +18,7 @@ subroutine zstar_eu
   USE buffers,          ONLY : get_buffer
   USE klist,            ONLY : wk, xk, ngk, igk_k
   USE symme,            ONLY : symtensor
-  USE wvfct,            ONLY : npwx
+  USE wvfct,            ONLY : npwx, nbnd
   USE uspp,             ONLY : okvan, vkb
   use noncollin_module, ONLY : npol, noncolin
   USE wavefunctions,    ONLY : evc
@@ -44,11 +44,13 @@ subroutine zstar_eu
        imode, nrec, mode, ik, ikk, ierr, npw
   ! counters
   real(DP) :: weight
+  COMPLEX(DP), ALLOCATABLE :: dvhub_nc(:,:)
   !
   call start_clock ('zstar_eu')
 
   zstareu0(:,:) = (0.d0,0.d0)
   zstareu (:,:,:) = 0.d0
+  IF (lda_plus_u .AND. noncolin) ALLOCATE(dvhub_nc(npwx*npol,nbnd))
 
   do ik = 1, nksq
      ikk=ikks(ik)
@@ -69,7 +71,15 @@ subroutine zstar_eu
            !
            ! DFPT+U: add the bare variation of the Hubbard potential 
            !
-           IF (lda_plus_u) CALL dvqhub_barepsi_us (ik, u(:,mode))
+           IF (lda_plus_u) THEN
+              IF (noncolin) THEN
+                 CALL dvqhub_barepsi_nc(ik, u(:,mode), .FALSE., .TRUE., &
+                      dvhub_nc)
+                 dvpsi = dvpsi + dvhub_nc
+              ELSE
+                 CALL dvqhub_barepsi_us(ik, u(:,mode))
+              ENDIF
+           ENDIF
            !
            do jpol = 1, 3
               nrec = (jpol - 1) * nksq + ik
@@ -125,6 +135,7 @@ subroutine zstar_eu
   done_zeu=.TRUE.
   call summarize_zeu()
   CALL ph_writefile('tensors',0,0,ierr)
+  IF (ALLOCATED(dvhub_nc)) DEALLOCATE(dvhub_nc)
 
   call stop_clock ('zstar_eu')
   return
