@@ -218,7 +218,13 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
             ! DFPT+U: add to dvpsi the scf part of the response
             ! Hubbard potential dV_hub
             !
-            IF (lda_plus_u .AND. (.NOT. exclude_hubbard_)) CALL adddvhubscf(ipert, ik)
+            IF (lda_plus_u .AND. (.NOT. exclude_hubbard_)) THEN
+               IF (noncolin) THEN
+                   CALL adddvhubscf_nc(ipert, ik, time_reversed)
+                ELSE
+                  CALL adddvhubscf(ipert, ik)
+               ENDIF
+            ENDIF
             !
          ENDIF
          !

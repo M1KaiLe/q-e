@@ -197,3 +197,111 @@ SUBROUTINE sym_dns (ldim, npe, irr, dns)
   ! 
 END SUBROUTINE sym_dns
 !---------------------------------------------------------------------
+
+!---------------------------------------------------------------------
+SUBROUTINE sym_dns_nc(ldim, npe, irr, dns)
+  !-------------------------------------------------------------------
+  !! Symmetrize a noncollinear Hubbard response.  Hermiticity relates q
+  !! and -q and therefore must not be imposed by transposing orbital indices
+  !! at a fixed generic q.
+  !
+  USE kinds,        ONLY : DP
+  USE constants,    ONLY : tpi
+  USE ions_base,    ONLY : nat, ityp
+  USE ldaU,         ONLY : Hubbard_l, is_hubbard, d_spin_ldau
+  USE lr_symm_base, ONLY : nsymq, minus_q, irotmq, rtau
+  USE modes,        ONLY : t, tmq
+  USE qpoint,       ONLY : xq
+  USE symm_base,    ONLY : d1, d2, d3, irt, t_rev
+  USE hubbard_nc_response, ONLY : hubbard_rotate_nc, hubbard_adjoint_nc, &
+                                  hubbard_spin_inverse_nc
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: ldim, npe, irr
+  COMPLEX(DP), INTENT(INOUT) :: dns(ldim,ldim,4,nat,npe)
+  !
+  INTEGER :: isym, irot, ip, jp, na, nb, nt, ldim_nt
+  REAL(DP) :: arg, dorb(ldim,ldim)
+  COMPLEX(DP) :: phase, dspin_inv(2,2)
+  COMPLEX(DP), ALLOCATABLE :: dnr(:,:,:,:,:), dnraux(:,:,:,:,:)
+  COMPLEX(DP), ALLOCATABLE :: rotated(:,:,:,:,:), adjoint(:,:,:,:)
+  !
+  IF ((nsymq == 1) .AND. (.NOT. minus_q)) RETURN
+  ALLOCATE(dnr(ldim,ldim,4,nat,npe), dnraux(ldim,ldim,4,nat,npe))
+  ALLOCATE(rotated(ldim,ldim,4,nat,npe), adjoint(ldim,ldim,4,nat))
+  dnr = dns
+  !
+  IF (minus_q) THEN
+     CALL rotate_dns_operation(irotmq, .TRUE., dnr, rotated)
+     DO ip = 1, npe
+        CALL hubbard_adjoint_nc(ldim, nat, rotated(:,:,:,:,ip), adjoint)
+        dnr(:,:,:,:,ip) = 0.5_DP * (dnr(:,:,:,:,ip) + adjoint)
+     END DO
+  ENDIF
+  !
+  dnraux = (0.0_DP, 0.0_DP)
+  DO isym = 1, nsymq
+     irot = isym
+     CALL rotate_dns_operation(irot, .FALSE., dnr, rotated)
+     dnraux = dnraux + rotated / REAL(nsymq,DP)
+  END DO
+  dns = dnraux
+  DEALLOCATE(dnr, dnraux, rotated, adjoint)
+  !
+CONTAINS
+  !
+  SUBROUTINE rotate_dns_operation(op, map_minus_q, input, output)
+    INTEGER, INTENT(IN) :: op
+    LOGICAL, INTENT(IN) :: map_minus_q
+    COMPLEX(DP), INTENT(IN) :: input(ldim,ldim,4,nat,npe)
+    COMPLEX(DP), INTENT(OUT) :: output(ldim,ldim,4,nat,npe)
+    COMPLEX(DP) :: block_in(ldim,ldim,4), block_out(ldim,ldim,4)
+    !
+    IF (t_rev(op) /= 0) CALL errore('sym_dns_nc', &
+         'antiunitary Hubbard-response symmetry is outside the supported scope', 1)
+    output = (0.0_DP, 0.0_DP)
+    DO ip = 1, npe
+       DO na = 1, nat
+          nt = ityp(na)
+          IF (.NOT. is_hubbard(nt)) CYCLE
+          nb = irt(op,na)
+          ldim_nt = 2 * Hubbard_l(nt) + 1
+          dorb = 0.0_DP
+          SELECT CASE(Hubbard_l(nt))
+          CASE(0)
+             dorb(1,1) = 1.0_DP
+          CASE(1)
+             dorb(1:ldim_nt,1:ldim_nt) = TRANSPOSE(d1(1:ldim_nt,1:ldim_nt,op))
+          CASE(2)
+             dorb(1:ldim_nt,1:ldim_nt) = TRANSPOSE(d2(1:ldim_nt,1:ldim_nt,op))
+          CASE(3)
+             dorb(1:ldim_nt,1:ldim_nt) = TRANSPOSE(d3(1:ldim_nt,1:ldim_nt,op))
+          CASE DEFAULT
+             CALL errore('sym_dns_nc','angular momentum not implemented',ABS(Hubbard_l(nt)))
+          END SELECT
+          CALL hubbard_spin_inverse_nc(d_spin_ldau(:,:,op), dspin_inv)
+          arg = tpi * DOT_PRODUCT(xq, rtau(:,op,na))
+          phase = CMPLX(COS(arg),SIN(arg),kind=DP)
+          DO jp = 1, npe
+             block_in = (0.0_DP, 0.0_DP)
+             block_in(1:ldim_nt,1:ldim_nt,:) = &
+                  input(1:ldim_nt,1:ldim_nt,:,nb,jp)
+             CALL hubbard_rotate_nc(ldim_nt, dorb(1:ldim_nt,1:ldim_nt), &
+                  dspin_inv, block_in(1:ldim_nt,1:ldim_nt,:), &
+                  block_out(1:ldim_nt,1:ldim_nt,:))
+             IF (map_minus_q) THEN
+                output(1:ldim_nt,1:ldim_nt,:,na,ip) = &
+                     output(1:ldim_nt,1:ldim_nt,:,na,ip) + &
+                     phase * tmq(jp,ip,irr) * block_out(1:ldim_nt,1:ldim_nt,:)
+             ELSE
+                output(1:ldim_nt,1:ldim_nt,:,na,ip) = &
+                     output(1:ldim_nt,1:ldim_nt,:,na,ip) + &
+                     phase * t(jp,ip,op,irr) * block_out(1:ldim_nt,1:ldim_nt,:)
+             ENDIF
+          END DO
+       END DO
+    END DO
+  END SUBROUTINE rotate_dns_operation
+  !
+END SUBROUTINE sym_dns_nc
+!---------------------------------------------------------------------

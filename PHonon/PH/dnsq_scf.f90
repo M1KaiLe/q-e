@@ -37,6 +37,7 @@ SUBROUTINE dnsq_scf (npe, lmetq0, imode0, irr, lflag)
   USE control_lr,    ONLY : lgamma, nbnd_occ
   USE units_lr,      ONLY : iuatswfc
   USE lsda_mod,      ONLY : lsda, nspin, current_spin, isk
+  USE noncollin_module, ONLY : noncolin, domag, npol
   USE wavefunctions, ONLY : evc
   USE ener,          ONLY : ef
   USE uspp,          ONLY : okvan 
@@ -73,8 +74,14 @@ SUBROUTINE dnsq_scf (npe, lmetq0, imode0, irr, lflag)
   COMPLEX(DP), EXTERNAL :: ZDOTC
   !
   CALL start_clock( 'dnsq_scf' )
+  !
+  IF (noncolin) THEN
+     CALL dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
+     CALL stop_clock( 'dnsq_scf' )
+     RETURN
+  ENDIF
   ! 
-  ALLOCATE (dpsi(npwx,nbnd))
+  ALLOCATE (dpsi(npwx*npol,nbnd))
   ALLOCATE (proj1(nbnd,nwfcU))
   ALLOCATE (proj2(nbnd,nwfcU))
   !
@@ -301,4 +308,186 @@ SUBROUTINE dnsq_scf (npe, lmetq0, imode0, irr, lflag)
   RETURN
   ! 
 END SUBROUTINE dnsq_scf
+!----------------------------------------------------------------------------
+
+!----------------------------------------------------------------------------
+SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
+  !----------------------------------------------------------------------------
+  !! Noncollinear response of the Hubbard occupation matrix.  A magnetic
+  !! calculation combines direct and -B Sternheimer solutions.  A
+  !! time-reversal-symmetric calculation obtains both bra/ket halves from the
+  !! direct solution, following HP/src/hp_dnsq.f90.
+  !
+  USE kinds,         ONLY : DP
+  USE io_files,      ONLY : nwordwfcU
+  USE units_lr,      ONLY : iuwfc, lrwfc, iudwf, lrdwf, iuatswfc
+  USE ions_base,     ONLY : nat, ityp
+  USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, is_hubbard, offsetU, nwfcU
+  USE ldaU_lr,       ONLY : swfcatomk, swfcatomkpq, dnsscf
+  USE ldaU_ph,       ONLY : dnsscf_all_modes
+  USE klist,         ONLY : wk, degauss, ngauss, ngk
+  USE wvfct,         ONLY : npwx, nbnd, et
+  USE qpoint,        ONLY : nksq, ikks, ikqs
+  USE qpoint_aux,    ONLY : ikmks
+  USE control_lr,    ONLY : lgamma, nbnd_occ
+  USE noncollin_module, ONLY : npol, domag
+  USE lsda_mod,      ONLY : nspin
+  USE wavefunctions, ONLY : evc
+  USE ener,          ONLY : ef
+  USE buffers,       ONLY : get_buffer
+  USE mp,            ONLY : mp_sum
+  USE mp_bands,      ONLY : intra_bgrp_comm
+  USE mp_pools,      ONLY : inter_pool_comm
+  USE efermi_shift,  ONLY : def
+  USE control_flags, ONLY : iverbosity
+  USE io_global,     ONLY : stdout
+  USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_branch_indices_nc, &
+                                  hubbard_kramers_indices_nc
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: npe, imode0, irr
+  LOGICAL, INTENT(IN) :: lmetq0, lflag
+  !
+  INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npw, npwq
+  INTEGER :: ipert, nrec, ibnd, nah, nt, ldim, ldim_nt
+  INTEGER :: m, m1, m2, is1, is2, is, ihubst, ihubst1, ihubst2
+  INTEGER :: mbra, mket, sbra, sket, ksign
+  REAL(DP) :: wdelta, w1
+  COMPLEX(DP), ALLOCATABLE :: dpsi(:,:), proj1(:,:), proj2(:,:)
+  COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:)
+  REAL(DP), EXTERNAL :: w0gauss
+  !
+  IF (.NOT. lflag) CALL errore('dnsq_scf_nc', &
+       'electric-field response is outside the noncollinear DFPT+U scope', 1)
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('dnsq_scf_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  !
+  ldim = 2 * Hubbard_lmax + 1
+  ALLOCATE(dpsi(npwx*npol,nbnd), proj1(nbnd,nwfcU), proj2(nbnd,nwfcU))
+  ALLOCATE(dns_branch(ldim,ldim,4,nat,npe))
+  dnsscf = (0.0_DP, 0.0_DP)
+  nsolv = MERGE(2, 1, domag)
+  !
+  DO isolv = 1, nsolv
+     dns_branch = (0.0_DP, 0.0_DP)
+     DO ik = 1, nksq
+        ikk = ikks(ik)
+        ikq = ikqs(ik)
+        IF (isolv == 1) THEN
+           ikmk = ikk
+        ELSE
+           ikmk = ikmks(ik)
+        ENDIF
+        ! The time-reversed records are stored with direct-k G ordering by
+        ! apply_trev.  Keep projector buffers and plane-wave maps at k,k+q.
+        npw = ngk(ikk)
+        npwq = ngk(ikq)
+        !
+        CALL get_buffer(evc, lrwfc, iuwfc, ikmk)
+        CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
+        IF (.NOT. lgamma) CALL get_buffer(swfcatomkpq, nwordwfcU, iuatswfc, ikq)
+        !
+        DO ipert = 1, npe
+           nrec = (isolv-1) * npe * nksq + (ipert-1) * nksq + ik
+           CALL get_buffer(dpsi, lrdwf, iudwf, nrec)
+           proj1 = (0.0_DP, 0.0_DP)
+           proj2 = (0.0_DP, 0.0_DP)
+           !
+           DO nah = 1, nat
+              nt = ityp(nah)
+              IF (.NOT. is_hubbard(nt)) CYCLE
+              ldim_nt = 2 * Hubbard_l(nt) + 1
+              DO is1 = 1, 2
+                 DO m = 1, ldim_nt
+                    ihubst = offsetU(nah) + m + ldim_nt*(is1-1)
+                    DO ibnd = 1, nbnd_occ(ikk)
+                       proj1(ibnd,ihubst) = DOT_PRODUCT( &
+                            swfcatomk(1:npw,ihubst), evc(1:npw,ibnd)) + &
+                            DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ihubst), &
+                                        evc(npwx+1:npwx+npw,ibnd))
+                       proj2(ibnd,ihubst) = DOT_PRODUCT( &
+                            swfcatomkpq(1:npwq,ihubst), dpsi(1:npwq,ibnd)) + &
+                            DOT_PRODUCT(swfcatomkpq(npwx+1:npwx+npwq,ihubst), &
+                                        dpsi(npwx+1:npwx+npwq,ibnd))
+                    END DO
+                 END DO
+              END DO
+           END DO
+           CALL mp_sum(proj1, intra_bgrp_comm)
+           CALL mp_sum(proj2, intra_bgrp_comm)
+           !
+           DO nah = 1, nat
+              nt = ityp(nah)
+              IF (.NOT. is_hubbard(nt)) CYCLE
+              ldim_nt = 2 * Hubbard_l(nt) + 1
+              DO is1 = 1, 2
+                 DO is2 = 1, 2
+                    is = hub_spin_index(is1,is2)
+                    DO m1 = 1, ldim_nt
+                           DO m2 = 1, ldim_nt
+                              CALL hubbard_branch_indices_nc(isolv,m1,m2,is1,is2, &
+                                   mbra,mket,sbra,sket)
+                              ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
+                              ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
+                              DO ibnd = 1, nbnd_occ(ikk)
+                                  dns_branch(m1,m2,is,nah,ipert) = &
+                                       dns_branch(m1,m2,is,nah,ipert) + &
+                                       wk(ikk) * CONJG(proj1(ibnd,ihubst1)) * &
+                                       proj2(ibnd,ihubst2)
+                                  ! The single nonmagnetic solve supplies its
+                                  ! fixed-q bra half through J R^T J^dagger.
+                                  IF (.NOT. domag) THEN
+                                     CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
+                                          mbra,mket,sbra,sket,ksign)
+                                     ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
+                                     ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
+                                     dns_branch(m1,m2,is,nah,ipert) = &
+                                          dns_branch(m1,m2,is,nah,ipert) + &
+                                          REAL(ksign,DP) * wk(ikk) * &
+                                          CONJG(proj1(ibnd,ihubst1)) * &
+                                          proj2(ibnd,ihubst2)
+                                  ENDIF
+                                 IF (lmetq0 .AND. isolv == 1) THEN
+                                    wdelta = w0gauss((ef-et(ibnd,ikk))/degauss,ngauss) / degauss
+                                    w1 = wk(ikk) * wdelta
+                                    dns_branch(m1,m2,is,nah,ipert) = &
+                                         dns_branch(m1,m2,is,nah,ipert) + &
+                                         w1 * def(ipert) * CONJG(proj1(ibnd, &
+                                         offsetU(nah)+m1+ldim_nt*(is1-1))) * &
+                                         proj1(ibnd,offsetU(nah)+m2+ldim_nt*(is2-1))
+                             ENDIF
+                          END DO
+                       END DO
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+      END DO
+      CALL mp_sum(dns_branch, inter_pool_comm)
+      dnsscf = dnsscf + dns_branch
+   END DO
+   !
+  CALL sym_dns_nc(ldim, npe, irr, dnsscf)
+  !
+  DO ipert = 1, npe
+     DO nah = 1, nat
+        nt = ityp(nah)
+        IF (.NOT. is_hubbard(nt)) CYCLE
+        DO is = 1, 4
+           DO m1 = 1, 2*Hubbard_l(nt)+1
+              DO m2 = 1, 2*Hubbard_l(nt)+1
+                 dnsscf_all_modes(m1,m2,is,nah,imode0+ipert) = &
+                      dnsscf(m1,m2,is,nah,ipert)
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  !
+  IF (iverbosity == 1) THEN
+     WRITE(stdout,'(5x,a)') 'DNSSCF NONCOLLINEAR SPIN BLOCKS: uu, ud, du, dd'
+  ENDIF
+  DEALLOCATE(dns_branch, dpsi, proj1, proj2)
+END SUBROUTINE dnsq_scf_nc
 !----------------------------------------------------------------------------

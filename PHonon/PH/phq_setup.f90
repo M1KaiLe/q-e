@@ -446,6 +446,9 @@ subroutine phq_setup
      ! Initialize d1, d2, d3 to rotate the spherical harmonics
      !
      CALL d_matrix (d1, d2, d3)
+     ! set_small_group_of_q may have reordered the symmetry operations.
+     ! Keep the spin rotations aligned with d1, d2, d3.
+     IF (noncolin) CALL comp_dspinldau()
      !
   ENDIF
   !

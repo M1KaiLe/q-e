@@ -18,6 +18,7 @@ SUBROUTINE sym_dns_wrapper (ldim, dns_cart, dns_pattern)
   USE ions_base,     ONLY : nat
   USE modes,         ONLY : u, nmodes, nirr, npert
   USE lsda_mod,      ONLY : nspin
+  USE noncollin_module, ONLY : noncolin, domag
   !
   IMPLICIT NONE
   !
@@ -58,7 +59,11 @@ SUBROUTINE sym_dns_wrapper (ldim, dns_cart, dns_pattern)
      ! pack
      dns_aux(:,:,:,:,1:npe) = dns_pattern(:,:,:,:,imode0:imode0-1+npe)
      ! symmetrize
-     CALL sym_dns (ldim, npe, irr, dns_aux)
+     IF (noncolin) THEN
+        CALL sym_dns_nc(ldim, npe, irr, dns_aux)
+     ELSE
+        CALL sym_dns(ldim, npe, irr, dns_aux)
+     ENDIF
      ! unpack
      dns_pattern(:,:,:,:,imode0:imode0-1+npe) = dns_aux(:,:,:,:,1:npe)
      ! deallocate

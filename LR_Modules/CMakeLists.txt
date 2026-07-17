@@ -1,4 +1,5 @@
 set(sources
+    hubbard_nc_response.f90
     adddvscf.f90
     adddvhubscf.f90
     addusdbec.f90

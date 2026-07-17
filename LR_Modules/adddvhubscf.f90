@@ -212,3 +212,112 @@ SUBROUTINE adddvhubscf (ipert, ik)
   RETURN
   ! 
 END SUBROUTINE adddvhubscf
+
+!----------------------------------------------------------------------------
+SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
+  !----------------------------------------------------------------------------
+  !! Apply the self-consistent noncollinear Dudarev response potential to
+  !! the wavefunctions used by the selected Sternheimer branch.
+  !
+  USE kinds,         ONLY : DP
+  USE ions_base,     ONLY : nat, ityp
+  USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, Hubbard_U, offsetU, &
+                            is_hubbard, nwfcU
+  USE ldaU_lr,       ONLY : swfcatomk, swfcatomkpq, dnsscf
+  USE io_files,      ONLY : nwordwfcU
+  USE units_lr,      ONLY : iuatswfc
+  USE buffers,       ONLY : get_buffer
+  USE wvfct,         ONLY : npwx, nbnd
+  USE noncollin_module, ONLY : npol
+  USE lsda_mod,      ONLY : nspin
+  USE wavefunctions, ONLY : evc
+  USE eqv,           ONLY : dvpsi
+  USE qpoint,        ONLY : ikks, ikqs
+  USE klist,         ONLY : ngk
+  USE control_lr,    ONLY : nbnd_occ, lgamma
+  USE mp,            ONLY : mp_sum
+  USE mp_bands,      ONLY : intra_bgrp_comm
+  USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_dv_from_dns_nc, &
+                                  hubbard_time_reverse_inplace_nc
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: ipert, ik
+  LOGICAL, INTENT(IN) :: time_reversed
+  INTEGER :: ikk, ikq, npw, npwq
+  INTEGER :: na, nt, ldim, ldim_nt, m1, m2, is1, is2, is
+  INTEGER :: ia, ib, ibnd, ig
+  REAL(DP), ALLOCATABLE :: u_atom(:)
+  COMPLEX(DP), ALLOCATABLE :: proj(:,:), dvhubmat(:,:,:,:), dvhubpsi(:,:)
+  !
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('adddvhubscf_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  ikk = ikks(ik)
+  ikq = ikqs(ik)
+  ! The branch record changes, but apply_trev stores both branches in the
+  ! direct k,k+q plane-wave ordering used by incdrhoscf_nc.
+  npw = ngk(ikk)
+  npwq = ngk(ikq)
+  ldim = 2 * Hubbard_lmax + 1
+  ALLOCATE(u_atom(nat), proj(nbnd,nwfcU))
+  ALLOCATE(dvhubmat(ldim,ldim,4,nat), dvhubpsi(npwx*npol,nbnd))
+  !
+  u_atom = 0.0_DP
+  DO na = 1, nat
+     u_atom(na) = Hubbard_U(ityp(na))
+  END DO
+  CALL hubbard_dv_from_dns_nc(ldim, nat, u_atom, &
+       dnsscf(:,:,:,:,ipert), dvhubmat)
+  IF (time_reversed) CALL hubbard_time_reverse_inplace_nc(ldim,nat,dvhubmat)
+  !
+  CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
+  IF (.NOT. lgamma) CALL get_buffer(swfcatomkpq, nwordwfcU, iuatswfc, ikq)
+  proj = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is2 = 1, 2
+        DO m2 = 1, ldim_nt
+           ib = offsetU(na) + m2 + ldim_nt*(is2-1)
+           DO ibnd = 1, nbnd_occ(ikk)
+              proj(ibnd,ib) = DOT_PRODUCT(swfcatomk(1:npw,ib),evc(1:npw,ibnd)) + &
+                   DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ib), &
+                               evc(npwx+1:npwx+npw,ibnd))
+           END DO
+        END DO
+     END DO
+  END DO
+  CALL mp_sum(proj, intra_bgrp_comm)
+  !
+  dvhubpsi = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is1 = 1, 2
+        DO is2 = 1, 2
+           is = hub_spin_index(is1,is2)
+           DO m1 = 1, ldim_nt
+              ia = offsetU(na) + m1 + ldim_nt*(is1-1)
+              DO m2 = 1, ldim_nt
+                 ib = offsetU(na) + m2 + ldim_nt*(is2-1)
+                 DO ibnd = 1, nbnd_occ(ikk)
+                    DO ig = 1, npwq
+                       dvhubpsi(ig,ibnd) = dvhubpsi(ig,ibnd) + &
+                            swfcatomkpq(ig,ia) * dvhubmat(m1,m2,is,na) * &
+                            proj(ibnd,ib)
+                       dvhubpsi(npwx+ig,ibnd) = dvhubpsi(npwx+ig,ibnd) + &
+                            swfcatomkpq(npwx+ig,ia) * dvhubmat(m1,m2,is,na) * &
+                            proj(ibnd,ib)
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  dvpsi(:,1:nbnd_occ(ikk)) = dvpsi(:,1:nbnd_occ(ikk)) + &
+       dvhubpsi(:,1:nbnd_occ(ikk))
+  DEALLOCATE(u_atom, proj, dvhubmat, dvhubpsi)
+END SUBROUTINE adddvhubscf_nc
+!----------------------------------------------------------------------------

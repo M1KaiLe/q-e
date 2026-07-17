@@ -6,6 +6,7 @@ include ../make.inc
 MODFLAGS=$(BASEMOD_FLAGS) $(MOD_FLAG)$(TOPDIR)/PW/src
 
 LR_MODULES = \
+hubbard_nc_response.o \
 adddvscf.o \
 adddvhubscf.o \
 addusdbec.o \

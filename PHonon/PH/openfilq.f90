@@ -22,8 +22,8 @@ SUBROUTINE openfilq()
   USE io_files,        ONLY : prefix, tmp_dir, diropn, seqopn, iunhub, &
                               iunhub_noS, nwordwfcU
   USE control_ph,      ONLY : epsil, zue, ext_recover, trans, &
-                              tmp_dir_phq, start_irr, last_irr, xmldyn, &
-                              all_done, newgrid
+                               tmp_dir_phq, start_irr, last_irr, xmldyn, &
+                               all_done, newgrid, current_iq
   USE save_ph,         ONLY : tmp_dir_save
   USE ions_base,       ONLY : nat
   USE cell_base,       ONLY : at
@@ -61,6 +61,7 @@ SUBROUTINE openfilq()
   USE mp_bands,        ONLY : intra_bgrp_comm,me_bgrp
   !
   IMPLICIT NONE
+  CHARACTER(LEN=6), EXTERNAL :: int_to_char
   !
   INTEGER :: ios
   ! integer variable for I/O control
@@ -324,7 +325,14 @@ SUBROUTINE openfilq()
         ! Open a file
         ! Note: if trans=.true. then dnsscf_all_modes will be written to file (see phqscf)
         !
-        IF (ionode) CALL seqopn (iundnsscf, 'dnsscf', 'formatted', exst)
+        IF (ionode) THEN
+             IF (noncolin) THEN
+                CALL seqopn(iundnsscf, 'dnsscf_nc_q' // &
+                    TRIM(int_to_char(current_iq)), 'formatted', exst)
+           ELSE
+              CALL seqopn(iundnsscf, 'dnsscf', 'formatted', exst)
+           ENDIF
+        ENDIF
         !
         ! If elph=.true. and trans=.true., then dnsscf (dnsscf_all_modes) is computed and
         ! kept in memory and hence we can directly use it in elphel.

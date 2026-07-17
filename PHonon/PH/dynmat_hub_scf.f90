@@ -22,7 +22,8 @@ SUBROUTINE dynmat_hub_scf (irr, nu_i0, nper)
   !   dyn_hub_scf (ipert, imode)  
   !  1) =  +\sum_{I,m1,m2,is} Hubbard_U(I) [0.5\delta_m1m2-ns(m1, m2, is, I)]* 
   !        \sum_{ibnd, k} wg(ibnd,k)[ <dpsi(ipert,ibnd,k+q, is)|dqsphi(imode,I,k+q,m1)><S\phi(I,k,m2)| psi(ibnd,k,is> + 
-  !                                   <dpsi(ipert,ibnd,k+q, is)|S\phi(I,k+q,m1)><dmqsphi(imode,I,k,m2)| psi(ibnd,k,is> +  m1<=>m2]   
+  !                                   <dpsi(ipert,ibnd,k+q, is)|S\phi(I,k+q,m1)>
+  !                                   <dmqsphi(imode,I,k,m2)|psi(ibnd,k,is> + m1<=>m2]
   !  2) = -\sum_{I,m1,m2,is} Hubbard_U(I) * CONJG(dnsscf(m1,m2,is,I,ipert)) * dnsbare(m2,m1,is,I,imode)  
   ! 
   ! Orthogonality terms present only in USPP:
@@ -46,6 +47,7 @@ SUBROUTINE dynmat_hub_scf (irr, nu_i0, nper)
   USE ldaU_lr,       ONLY : dnsscf, effU
   USE ldaU_ph,       ONLY : dnsbare, dnsbare_all_modes, dnsorth_cart
   USE lsda_mod,      ONLY : lsda, current_spin, isk, nspin
+  USE noncollin_module, ONLY : noncolin, domag
   USE modes,         ONLY : u, nmodes
   USE dynmat,        ONLY : dyn, dyn_rec, dyn_hub_scf
   USE qpoint,        ONLY : nksq, ikks, ikqs
@@ -88,6 +90,12 @@ SUBROUTINE dynmat_hub_scf (irr, nu_i0, nper)
   LOGICAL :: lmetq0   ! .true. if q=0 for a metal
   ! 
   CALL start_clock( 'dynmat_hub_scf' )
+  !
+  IF (noncolin) THEN
+     CALL dynmat_hub_scf_nc(irr, nu_i0, nper)
+     CALL stop_clock( 'dynmat_hub_scf' )
+     RETURN
+  ENDIF
   !
   ALLOCATE (dyn1(nper,nmodes))
   ALLOCATE (dyn_orth(nper,nmodes))
@@ -439,3 +447,109 @@ SUBROUTINE dynmat_hub_scf (irr, nu_i0, nper)
   RETURN
   !
 END SUBROUTINE dynmat_hub_scf
+
+!----------------------------------------------------------------------------
+SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
+  !----------------------------------------------------------------------------
+  USE kinds,         ONLY : DP
+  USE ions_base,     ONLY : nat, ityp
+  USE ldaU,          ONLY : Hubbard_l, Hubbard_U, is_hubbard
+  USE ldaU_lr,       ONLY : dnsscf
+  USE ldaU_ph,       ONLY : dnsbare_all_modes
+  USE modes,         ONLY : u, nmodes
+  USE dynmat,        ONLY : dyn, dyn_rec, dyn_hub_scf
+  USE qpoint,        ONLY : nksq, ikks, ikqs
+  USE qpoint_aux,    ONLY : ikmks
+  USE eqv,           ONLY : dpsi
+  USE wvfct,         ONLY : npwx, nbnd
+  USE noncollin_module, ONLY : npol, domag
+  USE lsda_mod,      ONLY : nspin
+  USE control_ph,    ONLY : rec_code_read
+  USE control_lr,    ONLY : lgamma
+  USE units_lr,      ONLY : iuwfc, lrwfc, iudwf, lrdwf
+  USE wavefunctions, ONLY : evc
+  USE buffers,       ONLY : get_buffer
+  USE klist,         ONLY : wk, lgauss, ltetra, ngk
+  USE mp,            ONLY : mp_sum
+  USE mp_bands,      ONLY : intra_bgrp_comm
+  USE mp_pools,      ONLY : inter_pool_comm
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: irr, nu_i0, nper
+  INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npwq
+  INTEGER :: ipert, imode, jmode, nrec, ibnd, nt, nah, m1, m2, is
+  REAL(DP) :: lmetq0
+  COMPLEX(DP), ALLOCATABLE :: dyn1(:,:), dvhub(:,:)
+  COMPLEX(DP) :: prj, cross
+  !
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('dynmat_hub_scf_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  ALLOCATE(dyn1(nper,nmodes), dvhub(npwx*npol,nbnd))
+  dyn1 = (0.0_DP, 0.0_DP)
+  nsolv = MERGE(2, 1, domag)
+  lmetq0 = MERGE(1.0_DP,0.0_DP,(lgauss .OR. ltetra) .AND. lgamma)
+  IF (rec_code_read == 10) CALL dnsq_scf(nper,lmetq0 > 0.5_DP,nu_i0,irr,.TRUE.)
+  !
+  DO isolv = 1, nsolv
+     DO ik = 1, nksq
+        ikk = ikks(ik)
+        ikq = ikqs(ik)
+        IF (isolv == 1) THEN
+           ikmk = ikk
+        ELSE
+           ikmk = ikmks(ik)
+        ENDIF
+        npwq = ngk(ikq)
+        CALL get_buffer(evc,lrwfc,iuwfc,ikmk)
+        DO imode = 1, nmodes
+           CALL dvqhub_barepsi_nc(ik,u(1,imode),isolv==2,.FALSE.,dvhub)
+           DO ipert = 1, nper
+              nrec = (isolv-1)*nper*nksq + (ipert-1)*nksq + ik
+              CALL get_buffer(dpsi,lrdwf,iudwf,nrec)
+              DO ibnd = 1, nbnd
+                 prj = DOT_PRODUCT(dpsi(1:npwq,ibnd),dvhub(1:npwq,ibnd)) + &
+                      DOT_PRODUCT(dpsi(npwx+1:npwx+npwq,ibnd), &
+                                  dvhub(npwx+1:npwx+npwq,ibnd))
+                 CALL mp_sum(prj,intra_bgrp_comm)
+                 dyn1(ipert,imode) = dyn1(ipert,imode) + 2.0_DP*wk(ikk)*prj
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  ! The magnetic density response averages the direct and -B solves.  In the
+  ! nonmagnetic case the prefactor two above supplies the Hermitian partner.
+  IF (domag) dyn1 = 0.5_DP * dyn1
+  CALL mp_sum(dyn1,inter_pool_comm)
+  !
+  DO ipert = 1, nper
+     DO imode = 1, nmodes
+        cross = (0.0_DP, 0.0_DP)
+        DO nah = 1, nat
+           nt = ityp(nah)
+           IF (.NOT. is_hubbard(nt)) CYCLE
+           DO is = 1, 4
+              DO m1 = 1, 2*Hubbard_l(nt)+1
+                 DO m2 = 1, 2*Hubbard_l(nt)+1
+                    cross = cross - Hubbard_U(nt) * &
+                         CONJG(dnsscf(m1,m2,is,nah,ipert)) * &
+                         dnsbare_all_modes(m1,m2,is,nah,imode)
+                 END DO
+              END DO
+           END DO
+        END DO
+        dyn1(ipert,imode) = dyn1(ipert,imode) + cross
+     END DO
+  END DO
+  !
+  DO imode = 1, nmodes
+     DO ipert = 1, nper
+        jmode = nu_i0 + ipert
+        dyn_hub_scf(jmode,imode) = dyn1(ipert,imode)
+        dyn_rec(jmode,imode) = dyn_rec(jmode,imode) + dyn1(ipert,imode)
+        dyn(jmode,imode) = dyn(jmode,imode) + dyn1(ipert,imode)
+     END DO
+  END DO
+  DEALLOCATE(dyn1,dvhub)
+END SUBROUTINE dynmat_hub_scf_nc
+!----------------------------------------------------------------------------

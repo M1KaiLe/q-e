@@ -26,7 +26,7 @@ SUBROUTINE phqscf
   USE modes,            ONLY : nirr, npert
   USE uspp_param,       ONLY : nhm
   USE paw_variables,    ONLY : okpaw
-  USE noncollin_module, ONLY : noncolin, nspin_mag
+  USE noncollin_module, ONLY : noncolin, domag, nspin_mag
   USE recover_mod,      ONLY : write_rec
   USE mp_pools,         ONLY : inter_pool_comm
   USE mp_bands,         ONLY : intra_bgrp_comm
@@ -40,6 +40,7 @@ SUBROUTINE phqscf
   USE units_ph,         ONLY : iundnsscf
   USE control_flags,    ONLY : iverbosity
   USE write_hub
+  USE hubbard_nc_response, ONLY : hubbard_nc_format
 
   IMPLICIT NONE
 
@@ -158,7 +159,14 @@ SUBROUTINE phqscf
      ! Write dnsscf_all_modes in the pattern basis u to file,
      ! because it is needed for el-ph calculations
      !
-     IF (ionode) WRITE(iundnsscf,*) dnsscf_all_modes
+     IF (ionode) THEN
+         IF (noncolin) THEN
+            WRITE(iundnsscf,'(A)') hubbard_nc_format
+           WRITE(iundnsscf,'("ldim=",I0,1X,"nspin=4 nat=",I0,1X,"nmodes=",I0,1X,&
+                &"spin_order=uu,ud,du,dd")') 2*Hubbard_lmax+1, nat, 3*nat
+        ENDIF
+        WRITE(iundnsscf,*) dnsscf_all_modes
+     ENDIF
      !
      ! Write dnsscf_all_modes in the cartesian coordinates
      ! to the standard output

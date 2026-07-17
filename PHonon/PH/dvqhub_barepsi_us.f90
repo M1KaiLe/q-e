@@ -384,3 +384,172 @@ SUBROUTINE dvqhub_barepsi_us (ik, uact)
   RETURN
   !
 END SUBROUTINE dvqhub_barepsi_us
+
+!----------------------------------------------------------------------------
+SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
+                             include_dnsbare, dvhub_out)
+  !----------------------------------------------------------------------------
+  !! Bare derivative of Phi V_U Phi^dagger for noncollinear magnetic,
+  !! norm-conserving Dudarev DFT+U.
+  !
+  USE kinds,         ONLY : DP
+  USE ions_base,     ONLY : nat, ityp
+  USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, Hubbard_U, offsetU, &
+                            is_hubbard, nwfcU
+  USE ldaU_ph,       ONLY : wfcatomk, wfcatomkpq, dnsbare
+  USE ldaU_lr,       ONLY : swfcatomk, swfcatomkpq
+  USE io_files,      ONLY : nwordwfcU
+  USE units_lr,      ONLY : iuatwfc, iuatswfc
+  USE buffers,       ONLY : get_buffer
+  USE wvfct,         ONLY : npwx, nbnd
+  USE noncollin_module, ONLY : npol
+  USE lsda_mod,      ONLY : nspin
+  USE wavefunctions, ONLY : evc
+  USE qpoint,        ONLY : ikks, ikqs
+  USE klist,         ONLY : ngk, igk_k
+  USE control_lr,    ONLY : nbnd_occ, lgamma
+  USE scf,           ONLY : v
+  USE mp,            ONLY : mp_sum
+  USE mp_bands,      ONLY : intra_bgrp_comm
+  USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_dv_from_dns_nc, &
+                                  hubbard_time_reverse_inplace_nc
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: ik
+  COMPLEX(DP), INTENT(IN) :: uact(3*nat)
+  LOGICAL, INTENT(IN) :: time_reversed
+  LOGICAL, INTENT(IN) :: include_dnsbare
+  COMPLEX(DP), INTENT(OUT) :: dvhub_out(npwx*npol,nbnd)
+  INTEGER :: ikk, ikq, npw, npwq, ldim, ldim_nt
+  INTEGER :: na, nt, icart, ip, is1, is2, js, is, m, m1, m2
+  INTEGER :: ia, ib, ibnd, ig
+  REAL(DP), ALLOCATABLE :: u_atom(:)
+  COMPLEX(DP), ALLOCATABLE :: dphik(:,:), dphikq(:,:), dtmp(:)
+  COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:), bare_dns(:,:,:,:)
+  COMPLEX(DP), ALLOCATABLE :: dvbare(:,:,:,:), vhub(:,:,:,:)
+  !
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('dvqhub_barepsi_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  ikk = ikks(ik)
+  ikq = ikqs(ik)
+  ! The time-reversed wavefunction records use direct k,k+q G ordering.
+  npw = ngk(ikk)
+  npwq = ngk(ikq)
+  ldim = 2 * Hubbard_lmax + 1
+  ALLOCATE(u_atom(nat), dphik(npwx*npol,nwfcU), dphikq(npwx*npol,nwfcU))
+  ALLOCATE(dtmp(npwx), proj(nbnd,nwfcU), dproj(nbnd,nwfcU))
+  ALLOCATE(bare_dns(ldim,ldim,4,nat), dvbare(ldim,ldim,4,nat))
+  ALLOCATE(vhub(ldim,ldim,4,nat))
+  !
+  CALL get_buffer(wfcatomk, nwordwfcU, iuatwfc, ikk)
+  CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
+  IF (.NOT. lgamma) THEN
+     CALL get_buffer(wfcatomkpq, nwordwfcU, iuatwfc, ikq)
+     CALL get_buffer(swfcatomkpq, nwordwfcU, iuatswfc, ikq)
+  ENDIF
+  !
+  dphik = (0.0_DP, 0.0_DP)
+  dphikq = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is1 = 1, 2
+        DO m = 1, ldim_nt
+           ia = offsetU(na) + m + ldim_nt*(is1-1)
+           DO icart = 1, 3
+              ip = 3*(na-1) + icart
+              DO js = 1, 2
+                  CALL dwfc(npw, igk_k(1,ikk), ikk, icart, &
+                      wfcatomk(1+(js-1)*npwx,ia), dtmp)
+                 dphik(1+(js-1)*npwx:npw+(js-1)*npwx,ia) = &
+                      dphik(1+(js-1)*npwx:npw+(js-1)*npwx,ia) + &
+                      uact(ip) * dtmp(1:npw)
+                  CALL dwfc(npwq, igk_k(1,ikq), ikq, icart, &
+                      wfcatomkpq(1+(js-1)*npwx,ia), dtmp)
+                 dphikq(1+(js-1)*npwx:npwq+(js-1)*npwx,ia) = &
+                      dphikq(1+(js-1)*npwx:npwq+(js-1)*npwx,ia) + &
+                      uact(ip) * dtmp(1:npwq)
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  !
+  proj = (0.0_DP, 0.0_DP)
+  dproj = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is2 = 1, 2
+        DO m2 = 1, ldim_nt
+           ib = offsetU(na) + m2 + ldim_nt*(is2-1)
+           DO ibnd = 1, nbnd_occ(ikk)
+              proj(ibnd,ib) = DOT_PRODUCT(swfcatomk(1:npw,ib),evc(1:npw,ibnd)) + &
+                   DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ib), &
+                               evc(npwx+1:npwx+npw,ibnd))
+              dproj(ibnd,ib) = DOT_PRODUCT(dphik(1:npw,ib),evc(1:npw,ibnd)) + &
+                   DOT_PRODUCT(dphik(npwx+1:npwx+npw,ib), &
+                               evc(npwx+1:npwx+npw,ibnd))
+           END DO
+        END DO
+     END DO
+  END DO
+  CALL mp_sum(proj, intra_bgrp_comm)
+  CALL mp_sum(dproj, intra_bgrp_comm)
+  !
+  bare_dns = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     DO icart = 1, 3
+        ip = 3*(na-1) + icart
+        bare_dns = bare_dns + uact(ip) * dnsbare(:,:,:,:,icart,na)
+     END DO
+  END DO
+  u_atom = 0.0_DP
+  DO na = 1, nat
+     u_atom(na) = Hubbard_U(ityp(na))
+  END DO
+  IF (include_dnsbare) THEN
+     CALL hubbard_dv_from_dns_nc(ldim,nat,u_atom,bare_dns,dvbare)
+  ELSE
+     dvbare = (0.0_DP, 0.0_DP)
+  ENDIF
+  vhub = v%ns_nc
+  IF (time_reversed) THEN
+     CALL hubbard_time_reverse_inplace_nc(ldim,nat,vhub)
+     CALL hubbard_time_reverse_inplace_nc(ldim,nat,dvbare)
+  ENDIF
+  !
+  dvhub_out = (0.0_DP, 0.0_DP)
+  DO na = 1, nat
+     nt = ityp(na)
+     IF (.NOT. is_hubbard(nt)) CYCLE
+     ldim_nt = 2 * Hubbard_l(nt) + 1
+     DO is1 = 1, 2
+        DO is2 = 1, 2
+           is = hub_spin_index(is1,is2)
+           DO m1 = 1, ldim_nt
+              ia = offsetU(na) + m1 + ldim_nt*(is1-1)
+              DO m2 = 1, ldim_nt
+                 ib = offsetU(na) + m2 + ldim_nt*(is2-1)
+                 DO ibnd = 1, nbnd_occ(ikk)
+                    DO ig = 1, npwq
+                       dvhub_out(ig,ibnd) = dvhub_out(ig,ibnd) + &
+                            dphikq(ig,ia)*vhub(m1,m2,is,na)*proj(ibnd,ib) + &
+                            swfcatomkpq(ig,ia)*vhub(m1,m2,is,na)*dproj(ibnd,ib) + &
+                            swfcatomkpq(ig,ia)*dvbare(m1,m2,is,na)*proj(ibnd,ib)
+                       dvhub_out(npwx+ig,ibnd) = dvhub_out(npwx+ig,ibnd) + &
+                            dphikq(npwx+ig,ia)*vhub(m1,m2,is,na)*proj(ibnd,ib) + &
+                            swfcatomkpq(npwx+ig,ia)*vhub(m1,m2,is,na)*dproj(ibnd,ib) + &
+                            swfcatomkpq(npwx+ig,ia)*dvbare(m1,m2,is,na)*proj(ibnd,ib)
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  DEALLOCATE(u_atom,dphik,dphikq,dtmp,proj,dproj,bare_dns,dvbare,vhub)
+END SUBROUTINE dvqhub_barepsi_nc
+!----------------------------------------------------------------------------

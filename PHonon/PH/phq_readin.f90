@@ -15,7 +15,7 @@ SUBROUTINE phq_readin()
   !
   !
   USE kinds,         ONLY : DP
-  USE ions_base,     ONLY : nat, ntyp => nsp
+  USE ions_base,     ONLY : nat, ityp, ntyp => nsp
   USE mp,            ONLY : mp_bcast
   USE mp_world,      ONLY : world_comm
   USE ions_base,     ONLY : amass, atm
@@ -48,6 +48,7 @@ SUBROUTINE phq_readin()
   USE io_files,      ONLY : tmp_dir, prefix, postfix, create_directory, &
                             check_tempdir, xmlpun_schema
   USE noncollin_module, ONLY : domag, i_cons, noncolin, lspinorb
+  USE symm_base,     ONLY : nsym, t_rev, no_t_rev
   USE control_flags, ONLY : iverbosity, modenum
   USE io_global,     ONLY : meta_ionode, meta_ionode_id, ionode, ionode_id, &
                             qestdin, stdout
@@ -71,7 +72,9 @@ SUBROUTINE phq_readin()
   USE elph_tetra_mod,ONLY : elph_tetra, lshift_q, in_alpha2f
   USE ktetra,        ONLY : tetra_type
   USE ldaU,          ONLY : lda_plus_u, Hubbard_projectors, lda_plus_u_kind, &
-                            is_hubbard_back
+                             is_hubbard_back, Hubbard_J0, Hubbard_alpha, &
+                             Hubbard_beta
+  USE uspp_param,    ONLY : upf
   USE ldaU_ph,       ONLY : read_dns_bare, d2ns_type
   USE dvscf_interpolate, ONLY : ldvscf_interpolate, do_long_range, &
       do_charge_neutral, wpot_dir
@@ -773,6 +776,27 @@ SUBROUTINE phq_readin()
           " Electron-phonon with Hubbard U is not supported",1)
      IF (lraman) CALL errore("phq_readin", &
           " The phonon code with Raman and Hubbard U is not implemented",1)
+      IF (noncolin) THEN
+          IF (okvan .OR. okpaw) CALL errore("phq_readin", &
+               " Noncollinear DFPT+U supports norm-conserving pseudopotentials only", 1)
+          IF (.NOT. lspinorb .OR. ANY(.NOT. upf(1:ntyp)%has_so)) &
+               CALL errore("phq_readin", &
+               " Noncollinear DFPT+U requires fully relativistic pseudopotentials", 1)
+          IF (ANY(ABS(Hubbard_J0(:)) > 1.0D-12) .OR. &
+             ANY(ABS(Hubbard_alpha(:)) > 1.0D-12) .OR. &
+             ANY(ABS(Hubbard_beta(:)) > 1.0D-12)) &
+               CALL errore("phq_readin", &
+               " Noncollinear DFPT+U supports Dudarev U only", 1)
+          IF (domag .AND. .NOT. no_t_rev) CALL errore("phq_readin", &
+               " Magnetic noncollinear DFPT+U requires no_t_rev=.true. in pw.x", 1)
+          IF (domag .AND. ANY(t_rev(1:nsym) /= 0)) CALL errore("phq_readin", &
+               " Magnetic noncollinear DFPT+U does not support antiunitary symmetries", 1)
+          IF (domag) THEN
+             WRITE(stdout,'(5x,a)') "Experimental noncollinear magnetic DFPT+U (NC, U-only)"
+          ELSE
+             WRITE(stdout,'(5x,a)') "Experimental nonmagnetic SOC DFPT+U (NC, U-only)"
+      ENDIF
+      ENDIF
      !
   ENDIF
   ! checks

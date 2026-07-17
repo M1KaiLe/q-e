@@ -45,6 +45,7 @@ SUBROUTINE dynmat_hub_bare
   USE control_lr,    ONLY : lgamma
   USE io_files,      ONLY : nwordwfcU, tmp_dir 
   USE lsda_mod,      ONLY : lsda, current_spin, isk, nspin
+  USE noncollin_module, ONLY : noncolin, domag
   USE modes,         ONLY : u, nmodes
   USE dynmat,        ONLY : dyn
   USE qpoint,        ONLY : nksq, ikks, ikqs
@@ -84,6 +85,12 @@ SUBROUTINE dynmat_hub_bare
   COMPLEX(DP), EXTERNAL :: ZDOTC  
   !
   CALL start_clock ( 'dynmat_hub_bare' )
+  !
+  IF (noncolin) THEN
+     CALL dynmat_hub_bare_nc()
+     CALL stop_clock( 'dynmat_hub_bare' )
+     RETURN
+  ENDIF
   !
   ios = 0
   !
@@ -600,3 +607,186 @@ SUBROUTINE dynmat_hub_bare
   RETURN
   !      
 END SUBROUTINE dynmat_hub_bare
+
+!----------------------------------------------------------------------------
+SUBROUTINE dynmat_hub_bare_nc()
+  !----------------------------------------------------------------------------
+  !! Norm-conserving noncollinear bare Hubbard dynamical matrix, evaluated
+  !! from the second derivative of E_U=U/2 Tr[N-N^2].
+  !
+  USE kinds,         ONLY : DP
+  USE ions_base,     ONLY : nat, ityp
+  USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, Hubbard_U, offsetU, &
+                            is_hubbard, nwfcU
+  USE ldaU_ph,       ONLY : wfcatomk, dnsbare
+  USE ldaU_lr,       ONLY : swfcatomk
+  USE io_files,      ONLY : nwordwfcU
+  USE units_lr,      ONLY : iuwfc, lrwfc, iuatwfc, iuatswfc
+  USE buffers,       ONLY : get_buffer
+  USE wavefunctions, ONLY : evc
+  USE wvfct,         ONLY : npwx, nbnd, wg
+  USE qpoint,        ONLY : nksq, ikks
+  USE klist,         ONLY : ngk, igk_k
+  USE noncollin_module, ONLY : npol
+  USE lsda_mod,      ONLY : nspin
+  USE scf,           ONLY : v
+  USE modes,         ONLY : u, nmodes
+  USE dynmat,        ONLY : dyn, dyn_hub_bare
+  USE mp,            ONLY : mp_sum
+  USE mp_bands,      ONLY : intra_bgrp_comm
+  USE mp_pools,      ONLY : inter_pool_comm
+  USE hubbard_nc_response, ONLY : hub_spin_index, hub_spin_transpose
+  !
+  IMPLICIT NONE
+  INTEGER :: ik, ikk, npw, na, nap, nt, ldim, ldim_nt
+  INTEGER :: ia_cart, ib_cart, icart, jcart, is1, is2, is, m, m1, m2
+  INTEGER :: ia, ib, ibnd, js, imode, jmode
+  COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:,:), d2proj(:,:,:,:)
+  COMPLEX(DP), ALLOCATABLE :: dtmp(:), d2tmp(:), d2n(:,:,:,:,:,:)
+  COMPLEX(DP), ALLOCATABLE :: dynwrk(:,:)
+  COMPLEX(DP) :: term, work
+  !
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('dynmat_hub_bare_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  ldim = 2 * Hubbard_lmax + 1
+  ALLOCATE(dyn_hub_bare(3*nat,3*nat), dynwrk(3*nat,3*nat))
+  ALLOCATE(d2n(ldim,ldim,4,nat,3,3))
+  ALLOCATE(proj(nbnd,nwfcU), dproj(nbnd,nwfcU,3), d2proj(nbnd,nwfcU,3,3))
+  ALLOCATE(dtmp(npwx), d2tmp(npwx))
+  dyn_hub_bare = (0.0_DP, 0.0_DP)
+  dynwrk = (0.0_DP, 0.0_DP)
+  d2n = (0.0_DP, 0.0_DP)
+  !
+  DO ik = 1, nksq
+     ikk = ikks(ik)
+     npw = ngk(ikk)
+     CALL get_buffer(evc, lrwfc, iuwfc, ikk)
+     CALL get_buffer(wfcatomk, nwordwfcU, iuatwfc, ikk)
+     CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
+     proj = (0.0_DP, 0.0_DP)
+     dproj = (0.0_DP, 0.0_DP)
+     d2proj = (0.0_DP, 0.0_DP)
+     !
+     DO na = 1, nat
+        nt = ityp(na)
+        IF (.NOT. is_hubbard(nt)) CYCLE
+        ldim_nt = 2 * Hubbard_l(nt) + 1
+        DO is1 = 1, 2
+           DO m = 1, ldim_nt
+              ia = offsetU(na) + m + ldim_nt*(is1-1)
+              DO ibnd = 1, nbnd
+                 proj(ibnd,ia) = DOT_PRODUCT(swfcatomk(1:npw,ia),evc(1:npw,ibnd)) + &
+                      DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ia), &
+                                  evc(npwx+1:npwx+npw,ibnd))
+              END DO
+              DO icart = 1, 3
+                 DO js = 1, 2
+                    CALL dwfc(npw,igk_k(1,ikk),ikk,icart, &
+                         wfcatomk(1+(js-1)*npwx,ia),dtmp)
+                    DO ibnd = 1, nbnd
+                       dproj(ibnd,ia,icart) = dproj(ibnd,ia,icart) + &
+                            DOT_PRODUCT(dtmp(1:npw), &
+                              evc(1+(js-1)*npwx:npw+(js-1)*npwx,ibnd))
+                    END DO
+                    DO jcart = 1, 3
+                       CALL d2wfc(npw,igk_k(1,ikk),ikk,icart,jcart, &
+                            wfcatomk(1+(js-1)*npwx,ia),d2tmp)
+                       DO ibnd = 1, nbnd
+                          d2proj(ibnd,ia,icart,jcart) = &
+                               d2proj(ibnd,ia,icart,jcart) + &
+                               DOT_PRODUCT(d2tmp(1:npw), &
+                                 evc(1+(js-1)*npwx:npw+(js-1)*npwx,ibnd))
+                       END DO
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+     END DO
+     CALL mp_sum(proj, intra_bgrp_comm)
+     CALL mp_sum(dproj, intra_bgrp_comm)
+     CALL mp_sum(d2proj, intra_bgrp_comm)
+     !
+     DO na = 1, nat
+        nt = ityp(na)
+        IF (.NOT. is_hubbard(nt)) CYCLE
+        ldim_nt = 2 * Hubbard_l(nt) + 1
+        DO is1 = 1, 2
+           DO is2 = 1, 2
+              is = hub_spin_index(is1,is2)
+              DO m1 = 1, ldim_nt
+                 ia = offsetU(na) + m1 + ldim_nt*(is1-1)
+                 DO m2 = 1, ldim_nt
+                    ib = offsetU(na) + m2 + ldim_nt*(is2-1)
+                    DO icart = 1, 3
+                       DO jcart = 1, 3
+                          DO ibnd = 1, nbnd
+                             d2n(m1,m2,is,na,icart,jcart) = &
+                                  d2n(m1,m2,is,na,icart,jcart) + wg(ibnd,ikk) * &
+                                  (CONJG(d2proj(ibnd,ia,icart,jcart))*proj(ibnd,ib) + &
+                                   CONJG(proj(ibnd,ia))*d2proj(ibnd,ib,icart,jcart) + &
+                                   CONJG(dproj(ibnd,ia,icart))*dproj(ibnd,ib,jcart) + &
+                                   CONJG(dproj(ibnd,ia,jcart))*dproj(ibnd,ib,icart))
+                          END DO
+                       END DO
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  CALL mp_sum(d2n, inter_pool_comm)
+  !
+  DO na = 1, nat
+     DO icart = 1, 3
+        ia_cart = 3*(na-1) + icart
+        DO nap = 1, nat
+           DO jcart = 1, 3
+              ib_cart = 3*(nap-1) + jcart
+              term = (0.0_DP, 0.0_DP)
+              DO nt = 1, nat
+                 IF (.NOT. is_hubbard(ityp(nt))) CYCLE
+                 ldim_nt = 2 * Hubbard_l(ityp(nt)) + 1
+                 IF (na == nt .AND. nap == nt) THEN
+                    DO is = 1, 4
+                       DO m1 = 1, ldim_nt
+                          DO m2 = 1, ldim_nt
+                             term = term + v%ns_nc(m1,m2,is,nt) * &
+                                  d2n(m2,m1,hub_spin_transpose(is),nt,icart,jcart)
+                          END DO
+                       END DO
+                    END DO
+                 ENDIF
+                 DO is = 1, 4
+                    DO m1 = 1, ldim_nt
+                       DO m2 = 1, ldim_nt
+                          term = term - Hubbard_U(ityp(nt)) * &
+                               CONJG(dnsbare(m1,m2,is,nt,icart,na)) * &
+                               dnsbare(m1,m2,is,nt,jcart,nap)
+                       END DO
+                    END DO
+                 END DO
+              END DO
+              dynwrk(ia_cart,ib_cart) = term
+           END DO
+        END DO
+     END DO
+  END DO
+  !
+  DO imode = 1, nmodes
+     DO jmode = 1, nmodes
+        work = (0.0_DP, 0.0_DP)
+        DO ia_cart = 1, 3*nat
+           DO ib_cart = 1, 3*nat
+              work = work + CONJG(u(ia_cart,imode)) * dynwrk(ia_cart,ib_cart) * &
+                   u(ib_cart,jmode)
+           END DO
+        END DO
+        dyn(imode,jmode) = dyn(imode,jmode) + work
+        dyn_hub_bare(imode,jmode) = dyn_hub_bare(imode,jmode) + work
+     END DO
+  END DO
+  DEALLOCATE(dynwrk,d2n,proj,dproj,d2proj,dtmp,d2tmp)
+END SUBROUTINE dynmat_hub_bare_nc
+!----------------------------------------------------------------------------

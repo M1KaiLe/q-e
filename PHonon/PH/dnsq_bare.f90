@@ -41,6 +41,7 @@ SUBROUTINE dnsq_bare
   USE units_lr,      ONLY : iuatwfc, iuatswfc
   USE uspp_param,    ONLY : nh, nhm 
   USE lsda_mod,      ONLY : lsda, nspin, current_spin, isk
+  USE noncollin_module, ONLY : noncolin, domag
   USE io_global,     ONLY : stdout, ionode, ionode_id
   USE mp_pools,      ONLY : inter_pool_comm
   USE mp_bands,      ONLY : intra_bgrp_comm 
@@ -65,6 +66,12 @@ SUBROUTINE dnsq_bare
   LOGICAL :: exst
   ! 
   CALL start_clock( 'dnsq_bare' )
+  !
+  IF (noncolin) THEN
+     CALL dnsq_bare_nc()
+     CALL stop_clock( 'dnsq_bare' )
+     RETURN
+  ENDIF
   ! 
   ios = 0
   !
@@ -335,3 +342,213 @@ SUBROUTINE dnsq_bare
   !
 END SUBROUTINE dnsq_bare
 !----------------------------------------------------------------------------------------
+
+!----------------------------------------------------------------------------
+SUBROUTINE dnsq_bare_nc()
+  !----------------------------------------------------------------------------
+  !! Bare projector contribution to the noncollinear Hubbard occupation
+  !! response. This path is restricted to norm-conserving pseudopotentials.
+  !
+  USE kinds,         ONLY : DP
+  USE io_files,      ONLY : nwordwfcU, seqopn
+  USE units_lr,      ONLY : iuwfc, lrwfc, iuatwfc, iuatswfc
+  USE ions_base,     ONLY : nat, ityp
+  USE klist,         ONLY : ngk, igk_k
+  USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, offsetU, is_hubbard, nwfcU
+  USE ldaU_ph,       ONLY : wfcatomk, dnsbare, dnsbare_all_modes, read_dns_bare
+  USE ldaU_lr,       ONLY : swfcatomk
+  USE wvfct,         ONLY : npwx, wg, nbnd
+  USE qpoint,        ONLY : nksq, ikks
+  USE qpoint_aux,    ONLY : ikmks
+  USE noncollin_module, ONLY : npol, domag
+  USE lsda_mod,      ONLY : nspin
+  USE wavefunctions, ONLY : evc
+  USE buffers,       ONLY : get_buffer
+  USE mp,            ONLY : mp_sum, mp_bcast
+  USE mp_pools,      ONLY : inter_pool_comm
+  USE mp_bands,      ONLY : intra_bgrp_comm
+  USE mp_world,      ONLY : world_comm
+  USE mp_images,     ONLY : intra_image_comm
+  USE io_global,     ONLY : ionode, ionode_id, stdout
+  USE control_ph,    ONLY : current_iq
+  USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_nc_format, &
+                                  hubbard_branch_indices_nc, &
+                                  hubbard_kramers_indices_nc
+  !
+  IMPLICIT NONE
+  INTEGER :: isolv, nsolv, ik, ikk, ikmk, npw, na, nah, nt, icart, ibnd
+  INTEGER :: is1, is2, js, is, m, m1, m2, ldim, ldim_nt
+  INTEGER :: ihubst, ihubst1, ihubst2, iunit, ipattern, ios
+  INTEGER :: mbra, mket, sbra, sket, ksign
+  LOGICAL :: exst, valid_restart
+  CHARACTER(LEN=80) :: header
+  CHARACTER(LEN=6), EXTERNAL :: int_to_char
+  COMPLEX(DP), ALLOCATABLE :: dphi(:,:), dtmp(:)
+  COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:)
+  COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:,:)
+  !
+  IF (npol /= 2 .OR. nspin /= 4) CALL errore('dnsq_bare_nc', &
+       'inconsistent noncollinear spin dimensions', 1)
+  ldim = 2 * Hubbard_lmax + 1
+  ALLOCATE(dphi(npwx*npol,nwfcU), dtmp(npwx))
+  ALLOCATE(proj(nbnd,nwfcU), dproj(nbnd,nwfcU))
+  ALLOCATE(dns_branch(ldim,ldim,4,nat,3,nat))
+  dnsbare = (0.0_DP, 0.0_DP)
+  nsolv = MERGE(2, 1, domag)
+  !
+  iunit = 37
+  exst = .FALSE.
+  valid_restart = .FALSE.
+  IF (ionode) CALL seqopn(iunit, 'dnsbare_nc', 'formatted', exst)
+  IF (read_dns_bare .AND. ionode .AND. exst) THEN
+     READ(iunit,'(A)',IOSTAT=ios) header
+     IF (ios == 0 .AND. TRIM(header) == hubbard_nc_format) THEN
+        READ(iunit,*,IOSTAT=ios) dnsbare
+        valid_restart = (ios == 0)
+     ENDIF
+  ENDIF
+  CALL mp_bcast(valid_restart, ionode_id, world_comm)
+  IF (valid_restart) THEN
+     CALL mp_bcast(dnsbare, ionode_id, world_comm)
+     CALL mp_bcast(dnsbare, ionode_id, intra_image_comm)
+  ELSE
+     WRITE(stdout,'(/5x,a)') 'Calculating noncollinear dnsbare matrix...'
+      DO isolv = 1, nsolv
+         dns_branch = (0.0_DP, 0.0_DP)
+         DO ik = 1, nksq
+            ikk = ikks(ik)
+            IF (isolv == 1) THEN
+               ikmk = ikk
+            ELSE
+               ikmk = ikmks(ik)
+            ENDIF
+           ! apply_trev stores the second branch in the direct-k G ordering.
+           npw = ngk(ikk)
+           CALL get_buffer(evc, lrwfc, iuwfc, ikmk)
+           CALL get_buffer(wfcatomk, nwordwfcU, iuatwfc, ikk)
+           CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
+           !
+           proj = (0.0_DP, 0.0_DP)
+           DO nah = 1, nat
+              nt = ityp(nah)
+              IF (.NOT. is_hubbard(nt)) CYCLE
+              ldim_nt = 2 * Hubbard_l(nt) + 1
+              DO is1 = 1, 2
+                 DO m = 1, ldim_nt
+                    ihubst = offsetU(nah) + m + ldim_nt*(is1-1)
+                    DO ibnd = 1, nbnd
+                       proj(ibnd,ihubst) = DOT_PRODUCT( &
+                            swfcatomk(1:npw,ihubst),evc(1:npw,ibnd)) + &
+                            DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ihubst), &
+                                        evc(npwx+1:npwx+npw,ibnd))
+                    END DO
+                 END DO
+              END DO
+           END DO
+           CALL mp_sum(proj, intra_bgrp_comm)
+           !
+           DO na = 1, nat
+              DO icart = 1, 3
+                 dphi = (0.0_DP, 0.0_DP)
+                 nt = ityp(na)
+                 IF (is_hubbard(nt)) THEN
+                    ldim_nt = 2 * Hubbard_l(nt) + 1
+                    DO is1 = 1, 2
+                       DO m = 1, ldim_nt
+                          ihubst = offsetU(na) + m + ldim_nt*(is1-1)
+                          DO js = 1, 2
+                              CALL dwfc(npw,igk_k(1,ikk),ikk,icart, &
+                                  wfcatomk(1+(js-1)*npwx,ihubst),dtmp)
+                             dphi(1+(js-1)*npwx:npw+(js-1)*npwx,ihubst) = &
+                                  dtmp(1:npw)
+                          END DO
+                       END DO
+                    END DO
+                 ENDIF
+                 !
+                 dproj = (0.0_DP, 0.0_DP)
+                 DO nah = 1, nat
+                    nt = ityp(nah)
+                    IF (.NOT. is_hubbard(nt)) CYCLE
+                    ldim_nt = 2 * Hubbard_l(nt) + 1
+                    DO is1 = 1, 2
+                       DO m = 1, ldim_nt
+                          ihubst = offsetU(nah) + m + ldim_nt*(is1-1)
+                          DO ibnd = 1, nbnd
+                             dproj(ibnd,ihubst) = DOT_PRODUCT( &
+                                  dphi(1:npw,ihubst),evc(1:npw,ibnd)) + &
+                                  DOT_PRODUCT( &
+                                  dphi(npwx+1:npwx+npw,ihubst), &
+                                  evc(npwx+1:npwx+npw,ibnd))
+                          END DO
+                       END DO
+                    END DO
+                 END DO
+                 CALL mp_sum(dproj, intra_bgrp_comm)
+                 !
+                 DO nah = 1, nat
+                    nt = ityp(nah)
+                    IF (.NOT. is_hubbard(nt)) CYCLE
+                    ldim_nt = 2 * Hubbard_l(nt) + 1
+                    DO is1 = 1, 2
+                       DO is2 = 1, 2
+                          is = hub_spin_index(is1,is2)
+                          DO m1 = 1, ldim_nt
+                              DO m2 = 1, ldim_nt
+                                 CALL hubbard_branch_indices_nc(isolv,m1,m2,is1,is2, &
+                                      mbra,mket,sbra,sket)
+                                 ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
+                                 ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
+                                 DO ibnd = 1, nbnd
+                                     dns_branch(m1,m2,is,nah,icart,na) = &
+                                          dns_branch(m1,m2,is,nah,icart,na) + &
+                                          wg(ibnd,ikk) * &
+                                          CONJG(proj(ibnd,ihubst1)) * &
+                                          dproj(ibnd,ihubst2)
+                                     ! Complete the nonmagnetic spinor response
+                                     ! with its fixed-q Kramers bra partner.
+                                     IF (.NOT. domag) THEN
+                                        CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
+                                             mbra,mket,sbra,sket,ksign)
+                                        ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
+                                        ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
+                                        dns_branch(m1,m2,is,nah,icart,na) = &
+                                             dns_branch(m1,m2,is,nah,icart,na) + &
+                                             REAL(ksign,DP) * wg(ibnd,ikk) * &
+                                             CONJG(proj(ibnd,ihubst1)) * &
+                                             dproj(ibnd,ihubst2)
+                                     ENDIF
+                                END DO
+                             END DO
+                          END DO
+                       END DO
+                    END DO
+                 END DO
+              END DO
+           END DO
+         END DO
+         CALL mp_sum(dns_branch, inter_pool_comm)
+         dnsbare = dnsbare + dns_branch
+      END DO
+      IF (ionode) THEN
+        REWIND(iunit)
+        WRITE(iunit,'(A)') hubbard_nc_format
+        WRITE(iunit,*) dnsbare
+     ENDIF
+  ENDIF
+  IF (ionode) CLOSE(iunit,STATUS='keep')
+  !
+  CALL sym_dns_wrapper(ldim, dnsbare, dnsbare_all_modes)
+  IF (ionode) THEN
+     ipattern = 38
+     CALL seqopn(ipattern,'dnsbare_nc_pattern_q' // &
+          TRIM(int_to_char(current_iq)),'formatted',exst)
+     WRITE(ipattern,'(A)') hubbard_nc_format
+     WRITE(ipattern,'("ldim=",I0,1X,"nspin=4 nat=",I0,1X,"nmodes=",I0,1X,&
+          &"spin_order=uu,ud,du,dd")') ldim, nat, 3*nat
+     WRITE(ipattern,*) dnsbare_all_modes
+     CLOSE(ipattern,STATUS='keep')
+  ENDIF
+  DEALLOCATE(dphi, dtmp, proj, dproj, dns_branch)
+END SUBROUTINE dnsq_bare_nc
+!----------------------------------------------------------------------------

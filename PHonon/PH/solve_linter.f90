@@ -44,7 +44,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   USE fft_base,             ONLY : dfftp, dffts
   USE lsda_mod,             ONLY : lsda, nspin, current_spin, isk
   USE wvfct,                ONLY : nbnd, npwx
-  USE scf,                  ONLY : rho, vrs
+  USE scf,                  ONLY : rho, v, vrs
 #if defined(__CUDA)
   USE scf_gpum,             ONLY : vrs_d
 #endif
@@ -84,7 +84,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   USE control_lr,           ONLY : lgamma
   USE dv_of_drho_lr,        ONLY : dv_of_drho
   USE fft_interfaces,       ONLY : fft_interpolate
-  USE ldaU,                 ONLY : lda_plus_u
+  USE ldaU,                 ONLY : lda_plus_u, Hubbard_lmax
+  USE hubbard_nc_response,  ONLY : hubbard_time_reverse_inplace_nc
   USE nc_mag_aux,           ONLY : int1_nc_save, deeq_nc_save, int3_save
   USE apply_dpot_mod,       ONLY : apply_dpot_allocate, apply_dpot_deallocate
   USE response_kernels,     ONLY : sternheimer_kernel
@@ -280,7 +281,15 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
               ! Hubbard potential dvbare_hub_q * psi_kpoint
               ! is calculated and added to dvpsi.
               !
-              IF (lda_plus_u) CALL dvqhub_barepsi_us(ik, u(1,mode))
+               IF (lda_plus_u) THEN
+                  IF (noncolin) THEN
+                      CALL dvqhub_barepsi_nc(ik, u(1,mode), .FALSE., &
+                           .TRUE., aux2)
+                     dvpsi = dvpsi + aux2
+                  ELSE
+                     CALL dvqhub_barepsi_us(ik, u(1,mode))
+                  ENDIF
+               ENDIF
               !
            ELSE
               IF (okvan) THEN
@@ -288,7 +297,12 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
                  !$acc update device(deeq_nc)
                  int1_nc(:,:,:,:,:) = int1_nc_save(:,:,:,:,:,2)
               ENDIF
-              CALL dvqpsi_us(ik, u(1, mode), .FAlSE., becpt, alphapt)
+               CALL dvqpsi_us(ik, u(1, mode), .FAlSE., becpt, alphapt)
+               IF (lda_plus_u) THEN
+                  CALL dvqhub_barepsi_nc(ik, u(1,mode), .TRUE., &
+                       .TRUE., aux2)
+                  dvpsi = dvpsi + aux2
+               ENDIF
               IF (okvan) THEN
                  deeq_nc(:,:,:,:) = deeq_nc_save(:,:,:,:,1)
                  !$acc update device(deeq_nc)
@@ -331,6 +345,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
               IF (okvan) int3_nc(:,:,:,:,:) = int3_save(:,:,:,:,:,2)
            ENDIF
            vrs(:, 2:4) = -vrs(:, 2:4)
+           IF (lda_plus_u) CALL hubbard_time_reverse_inplace_nc( &
+                2*Hubbard_lmax+1, nat, v%ns_nc)
 #if defined(__CUDA)
            vrs_d = vrs
 #endif
@@ -362,6 +378,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
               IF (okvan) int3_nc(:,:,:,:,:) = int3_save(:,:,:,:,:,1)
            ENDIF
            vrs(:, 2:4) = -vrs(:, 2:4)
+           IF (lda_plus_u) CALL hubbard_time_reverse_inplace_nc( &
+                2*Hubbard_lmax+1, nat, v%ns_nc)
 #if defined(__CUDA)
            vrs_d = vrs
 #endif
