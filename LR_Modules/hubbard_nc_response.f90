@@ -52,29 +52,28 @@ CONTAINS
   END FUNCTION hub_spin_transpose
   !
   PURE SUBROUTINE hubbard_branch_indices_nc(branch, m1, m2, is1, is2, &
-                                             mbra, mket, sbra, sket)
+                                             mbra, mket, sbra, sket, sign)
     !! Projector indices for the magnetic two-Sternheimer construction.
-    !! The -B solution supplies the bra/ket-transposed half of delta N.
+    !! The -B solution supplies J (delta N)^T J^dagger, J=i*sigma_y.
     INTEGER, INTENT(IN) :: branch, m1, m2, is1, is2
-    INTEGER, INTENT(OUT) :: mbra, mket, sbra, sket
+    INTEGER, INTENT(OUT) :: mbra, mket, sbra, sket, sign
     IF (branch == 1) THEN
        mbra = m1
        mket = m2
        sbra = is1
        sket = is2
+       sign = 1
     ELSE
-       mbra = m2
-       mket = m1
-       sbra = is2
-       sket = is1
+       CALL hubbard_kramers_indices_nc(m1, m2, is1, is2, &
+                                       mbra, mket, sbra, sket, sign)
     ENDIF
   END SUBROUTINE hubbard_branch_indices_nc
   !
   PURE SUBROUTINE hubbard_kramers_indices_nc(m1, m2, is1, is2, &
                                               mbra, mket, sbra, sket, sign)
-    !! Indices for the bra-response partner in a time-reversal-symmetric
-    !! spinor calculation.  At fixed q this partner is J R^T J^dagger,
-    !! J=i*sigma_y, rather than the ordinary transpose used without SOC.
+    !! Indices for a spinor time-reversed transpose.  Both the nonmagnetic
+    !! fixed-q bra partner and the magnetic -B branch require J R^T J^dagger,
+    !! J=i*sigma_y, rather than an ordinary combined transpose.
     INTEGER, INTENT(IN) :: m1, m2, is1, is2
     INTEGER, INTENT(OUT) :: mbra, mket, sbra, sket, sign
     !

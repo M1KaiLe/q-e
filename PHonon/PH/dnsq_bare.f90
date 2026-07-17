@@ -379,7 +379,7 @@ SUBROUTINE dnsq_bare_nc()
   INTEGER :: isolv, nsolv, ik, ikk, ikmk, npw, na, nah, nt, icart, ibnd
   INTEGER :: is1, is2, js, is, m, m1, m2, ldim, ldim_nt
   INTEGER :: ihubst, ihubst1, ihubst2, iunit, ipattern, ios
-  INTEGER :: mbra, mket, sbra, sket, ksign
+  INTEGER :: mbra, mket, sbra, sket, bsign, ksign
   INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
   LOGICAL :: exst, valid_restart
   CHARACTER(LEN=80) :: header
@@ -497,13 +497,13 @@ SUBROUTINE dnsq_bare_nc()
                           DO m1 = 1, ldim_nt
                               DO m2 = 1, ldim_nt
                                  CALL hubbard_branch_indices_nc(isolv,m1,m2,is1,is2, &
-                                      mbra,mket,sbra,sket)
+                                      mbra,mket,sbra,sket,bsign)
                                  ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
                                  ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
                                  DO ibnd = 1, nbnd
                                      dns_branch(m1,m2,is,nah,icart,na) = &
                                           dns_branch(m1,m2,is,nah,icart,na) + &
-                                          wg(ibnd,ikk) * &
+                                          REAL(bsign,DP) * wg(ibnd,ikk) * &
                                           CONJG(proj(ibnd,ihubst1)) * &
                                           dproj(ibnd,ihubst2)
                                       ! Complete the nonmagnetic spinor response

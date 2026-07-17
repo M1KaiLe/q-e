@@ -351,7 +351,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npw, npwq
   INTEGER :: ipert, nrec, ibnd, nah, nt, ldim, ldim_nt
   INTEGER :: m, m1, m2, is1, is2, is, ihubst, ihubst1, ihubst2
-  INTEGER :: mbra, mket, sbra, sket, ksign
+  INTEGER :: mbra, mket, sbra, sket, bsign, ksign
   INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
   REAL(DP) :: wdelta, w1
   COMPLEX(DP), ALLOCATABLE :: dpsi(:,:), proj1(:,:), proj2(:,:)
@@ -427,13 +427,14 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
                     DO m1 = 1, ldim_nt
                            DO m2 = 1, ldim_nt
                               CALL hubbard_branch_indices_nc(isolv,m1,m2,is1,is2, &
-                                   mbra,mket,sbra,sket)
+                                   mbra,mket,sbra,sket,bsign)
                               ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
                               ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
                               DO ibnd = 1, nbnd_occ(ikk)
                                   dns_branch(m1,m2,is,nah,ipert) = &
                                        dns_branch(m1,m2,is,nah,ipert) + &
-                                       wk(ikk) * CONJG(proj1(ibnd,ihubst1)) * &
+                                       REAL(bsign,DP) * wk(ikk) * &
+                                       CONJG(proj1(ibnd,ihubst1)) * &
                                        proj2(ibnd,ihubst2)
                                    ! The single nonmagnetic solve supplies its
                                    ! fixed-q bra half through J R^T J^dagger.

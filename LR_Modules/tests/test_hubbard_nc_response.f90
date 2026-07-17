@@ -6,7 +6,7 @@ PROGRAM test_hubbard_nc_response
   INTEGER, PARAMETER :: ldim = 2, nat = 1
   REAL(DP), PARAMETER :: tol = 1.0E-12_DP
   INTEGER :: failures, is, is1, is2, m1, m2
-  INTEGER :: mbra, mket, sbra, sket, ksign
+  INTEGER :: mbra, mket, sbra, sket, bsign, ksign
   REAL(DP) :: u_atom(nat), d1(ldim,ldim), d2(ldim,ldim), deff(ldim,ldim)
   COMPLEX(DP) :: dns(ldim,ldim,4,nat), dv(ldim,ldim,4,nat)
   COMPLEX(DP) :: a(ldim,ldim,4,nat), b(ldim,ldim,4,nat)
@@ -27,16 +27,24 @@ PROGRAM test_hubbard_nc_response
      END DO
   END DO
 
-  CALL hubbard_branch_indices_nc(1,1,2,1,2,mbra,mket,sbra,sket)
+  CALL hubbard_branch_indices_nc(1,1,2,1,2,mbra,mket,sbra,sket,bsign)
   CALL check_int(mbra,1,'direct branch bra orbital',failures)
   CALL check_int(mket,2,'direct branch ket orbital',failures)
   CALL check_int(sbra,1,'direct branch bra spin',failures)
   CALL check_int(sket,2,'direct branch ket spin',failures)
-  CALL hubbard_branch_indices_nc(2,1,2,1,2,mbra,mket,sbra,sket)
-  CALL check_int(mbra,2,'time-reversed branch bra orbital',failures)
-  CALL check_int(mket,1,'time-reversed branch ket orbital',failures)
-  CALL check_int(sbra,2,'time-reversed branch bra spin',failures)
-  CALL check_int(sket,1,'time-reversed branch ket spin',failures)
+  CALL check_int(bsign,1,'direct branch sign',failures)
+  DO is1 = 1, 2
+     DO is2 = 1, 2
+        CALL hubbard_branch_indices_nc(2,1,2,is1,is2, &
+             mbra,mket,sbra,sket,bsign)
+        CALL check_int(mbra,2,'time-reversed branch bra orbital',failures)
+        CALL check_int(mket,1,'time-reversed branch ket orbital',failures)
+        CALL check_int(sbra,3-is2,'time-reversed branch bra spin',failures)
+        CALL check_int(sket,3-is1,'time-reversed branch ket spin',failures)
+        CALL check_int(bsign,MERGE(1,-1,is1==is2), &
+             'time-reversed branch sign',failures)
+     END DO
+  END DO
 
   CALL hubbard_kramers_indices_nc(1,2,1,2,mbra,mket,sbra,sket,ksign)
   CALL check_int(mbra,2,'Kramers bra orbital',failures)
@@ -63,6 +71,23 @@ PROGRAM test_hubbard_nc_response
   CALL check_array(a,b,'Kramers fixed-q partner',failures)
   CALL hubbard_kramers_partner_nc(ldim,nat,a,b)
   CALL check_array(b,dns,'Kramers partner squared',failures)
+
+  a = (0.0_DP,0.0_DP)
+  DO is1 = 1, 2
+     DO is2 = 1, 2
+        is = hub_spin_index(is1,is2)
+        DO m2 = 1, ldim
+           DO m1 = 1, ldim
+              CALL hubbard_branch_indices_nc(2,m1,m2,is1,is2, &
+                   mbra,mket,sbra,sket,bsign)
+              a(m1,m2,is,1) = REAL(bsign,DP) * &
+                   dns(mbra,mket,hub_spin_index(sbra,sket),1)
+           END DO
+        END DO
+     END DO
+  END DO
+  CALL hubbard_kramers_partner_nc(ldim,nat,dns,b)
+  CALL check_array(a,b,'magnetic branch-2 spin time reversal',failures)
 
   CALL hubbard_dv_from_dns_nc(ldim,nat,u_atom,dns,dv)
   DO is = 1, 4
