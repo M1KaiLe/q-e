@@ -72,6 +72,10 @@ PROGRAM test_hubbard_nc_response
   CALL hubbard_kramers_partner_nc(ldim,nat,a,b)
   CALL check_array(b,dns,'Kramers partner squared',failures)
 
+  b = 0.5_DP * (dns + a)
+  CALL hubbard_kramers_partner_nc(ldim,nat,b,a)
+  CALL check_array(a,b,'pure-TR ground-state average',failures)
+
   a = dns
   CALL hubbard_response_branch_inplace_nc(ldim,nat,a)
   CALL hubbard_kramers_partner_nc(ldim,nat,dns,b)

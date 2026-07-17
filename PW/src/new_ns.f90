@@ -405,6 +405,30 @@ SUBROUTINE new_ns_nc( ns )
   !
   CALL mp_sum( nr, inter_pool_comm )
   !
+  ! When kpoint_grid uses pure time reversal, wg contains the combined weight
+  ! of k and -k but nr contains projections from the representative k only.
+  ! Restore its Kramers partner, J nr^T J^dagger, before spatial symmetrization.
+  ! The full-k noinv path has time_reversal=.FALSE. and remains an independent
+  ! reference calculation.
+  !
+  IF (time_reversal) THEN
+     nr1 = nr
+     DO na = 1, nat
+        nt = ityp(na)
+        IF (.NOT. is_hubbard(nt)) CYCLE
+        ldim = 2 * Hubbard_l(nt) + 1
+        DO is1 = 1, npol
+           DO is2 = 1, npol
+              nr(1:ldim,1:ldim,is1,is2,na) = 0.5_DP * ( &
+                   nr1(1:ldim,1:ldim,is1,is2,na) + &
+                   REAL(MERGE(1,-1,is1==is2),DP) * &
+                   TRANSPOSE(nr1(1:ldim,1:ldim,3-is2,3-is1,na)) )
+           END DO
+        END DO
+     END DO
+     nr1 = (0.0_DP,0.0_DP)
+  ENDIF
+  !
   !--  symmetrize: nr  -->  nr1
   !
   DO na = 1, nat  
@@ -551,4 +575,3 @@ loopisym:     DO isym = 1, nsym
   RETURN
   !
 END SUBROUTINE new_ns_nc
-
