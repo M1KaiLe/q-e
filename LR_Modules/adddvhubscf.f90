@@ -233,6 +233,7 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
   USE wavefunctions, ONLY : evc
   USE eqv,           ONLY : dvpsi
   USE qpoint,        ONLY : ikks, ikqs
+  USE qpoint_aux,    ONLY : ikmks
   USE klist,         ONLY : ngk
   USE control_lr,    ONLY : nbnd_occ, lgamma
   USE mp,            ONLY : mp_sum
@@ -243,7 +244,7 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: ipert, ik
   LOGICAL, INTENT(IN) :: time_reversed
-  INTEGER :: ikk, ikq, npw, npwq
+  INTEGER :: ikk, ikq, ikmk, npw, npwq, nbnd_branch
   INTEGER :: na, nt, ldim, ldim_nt, m1, m2, is1, is2, is
   INTEGER :: ia, ib, ibnd, ig
   REAL(DP), ALLOCATABLE :: u_atom(:)
@@ -253,6 +254,12 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
        'inconsistent noncollinear spin dimensions', 1)
   ikk = ikks(ik)
   ikq = ikqs(ik)
+  IF (time_reversed) THEN
+     ikmk = ikmks(ik)
+  ELSE
+     ikmk = ikk
+  ENDIF
+  nbnd_branch = nbnd_occ(ikmk)
   ! The branch record changes, but apply_trev stores both branches in the
   ! direct k,k+q plane-wave ordering used by incdrhoscf_nc.
   npw = ngk(ikk)
@@ -281,7 +288,7 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
      DO is2 = 1, 2
         DO m2 = 1, ldim_nt
            ib = offsetU(na) + m2 + ldim_nt*(is2-1)
-           DO ibnd = 1, nbnd_occ(ikk)
+           DO ibnd = 1, nbnd_branch
               proj(ibnd,ib) = DOT_PRODUCT(swfcatomk(1:npw,ib),evc(1:npw,ibnd)) + &
                    DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ib), &
                                evc(npwx+1:npwx+npw,ibnd))
@@ -303,7 +310,7 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
               ia = offsetU(na) + m1 + ldim_nt*(is1-1)
               DO m2 = 1, ldim_nt
                  ib = offsetU(na) + m2 + ldim_nt*(is2-1)
-                 DO ibnd = 1, nbnd_occ(ikk)
+                 DO ibnd = 1, nbnd_branch
                     DO ig = 1, npwq
                        dvhubpsi(ig,ibnd) = dvhubpsi(ig,ibnd) + &
                             swfcatomkpq(ig,ia) * dvhubmat(m1,m2,is,na) * &
@@ -318,8 +325,8 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
         END DO
      END DO
   END DO
-  dvpsi(:,1:nbnd_occ(ikk)) = dvpsi(:,1:nbnd_occ(ikk)) + &
-       dvhubpsi(:,1:nbnd_occ(ikk))
+  dvpsi(:,1:nbnd_branch) = dvpsi(:,1:nbnd_branch) + &
+       dvhubpsi(:,1:nbnd_branch)
   DEALLOCATE(u_atom, proj, dvhubmat, dvhubpsi)
 END SUBROUTINE adddvhubscf_nc
 !----------------------------------------------------------------------------

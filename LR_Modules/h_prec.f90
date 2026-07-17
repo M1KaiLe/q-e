@@ -8,20 +8,37 @@
 !-----------------------------------------------------------------------
 subroutine h_prec (ik, evq, h_diag)
   !-----------------------------------------------------------------------
+  USE kinds,            ONLY : dp
+  USE qpoint,           ONLY : ikks
+  USE wvfct,            ONLY : npwx, nbnd
+  USE control_lr,       ONLY : nbnd_occ
+  USE noncollin_module, ONLY : npol
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(in) :: ik
+  COMPLEX(dp), INTENT(in) :: evq(npwx*npol, nbnd)
+  REAL(dp), INTENT(out) :: h_diag(npwx*npol, nbnd)
+  !
+  CALL h_prec_branch(ik, evq, h_diag, nbnd_occ(ikks(ik)))
+  !
+END SUBROUTINE h_prec
+!-----------------------------------------------------------------------
+subroutine h_prec_branch (ik, evq, h_diag, nbnd_use)
+  !-----------------------------------------------------------------------
   !
   ! ... Compute the precondition vector h_diag used in the solution of the
   ! ... linear system - On input:
   ! ... ik     index of k-point
   ! ... evq    wavefunction at k+q point
-  !...  h_diag must be allocated
+  ! ... nbnd_use number of occupied source bands in the active branch
+  ! ... h_diag must be allocated
   ! ... g2kin  contains kinetic energy (k+q+G)^2 for the current k+q point
   !
   USE kinds,      ONLY : dp
   USE klist,      ONLY : ngk
-  USE qpoint,     ONLY : ikqs, ikks
+  USE qpoint,     ONLY : ikqs
   USE wvfct,      ONLY : g2kin, npwx, nbnd
   USE gvect,      ONLY : gstart
-  USE control_lr, ONLY : nbnd_occ
   USE mp,         ONLY : mp_sum
   USE mp_bands,   ONLY : intra_bgrp_comm
   USE control_flags,    ONLY : gamma_only
@@ -29,18 +46,18 @@ subroutine h_prec (ik, evq, h_diag)
   !
   IMPLICIT NONE
   INTEGER, INTENT(in) :: ik
+  INTEGER, INTENT(in) :: nbnd_use
   COMPLEX(dp), INTENT(in) :: evq(npwx*npol, nbnd)
   REAL(dp), INTENT(out) :: h_diag(npwx*npol, nbnd)
   !
   REAL(dp), ALLOCATABLE :: eprec(:)
   COMPLEX(dp), ALLOCATABLE :: aux(:)
-  INTEGER :: ibnd, nbnd_, ig, ikk, ikq, npwq
+  INTEGER :: ibnd, nbnd_, ig, ikq, npwq
   REAL(dp), EXTERNAL :: DDOT
   !
-  ikk = ikks(ik)
   ikq = ikqs(ik)
   npwq = ngk(ikq)
-  nbnd_=nbnd_occ(ikk)
+  nbnd_ = nbnd_use
 
   CALL start_clock('h_prec')
 
@@ -91,4 +108,4 @@ subroutine h_prec (ik, evq, h_diag)
 
   DEALLOCATE (eprec)
 
-END SUBROUTINE h_prec
+END SUBROUTINE h_prec_branch

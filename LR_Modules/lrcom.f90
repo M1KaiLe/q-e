@@ -61,6 +61,7 @@ MODULE control_lr
   SAVE
   !
   INTEGER, ALLOCATABLE :: nbnd_occ(:)  ! occupied bands in metals
+  INTEGER :: current_ikq_occ = 0 ! k+q index for the active occupied manifold
   REAL(DP) :: alpha_pv       ! the alpha value for shifting the bands
   LOGICAL  :: lgamma         ! if .TRUE. this is a q=0 computation
   LOGICAL  :: lrpa           ! if .TRUE. uses the Random Phace Approximation

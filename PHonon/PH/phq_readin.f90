@@ -777,6 +777,8 @@ SUBROUTINE phq_readin()
      IF (lraman) CALL errore("phq_readin", &
           " The phonon code with Raman and Hubbard U is not implemented",1)
       IF (noncolin) THEN
+          IF (ltetra) CALL errore("phq_readin", &
+               " Noncollinear DFPT+U metals require Gaussian smearing", 1)
           IF (okvan .OR. okpaw) CALL errore("phq_readin", &
                " Noncollinear DFPT+U supports norm-conserving pseudopotentials only", 1)
           IF (.NOT. lspinorb .OR. ANY(.NOT. upf(1:ntyp)%has_so)) &

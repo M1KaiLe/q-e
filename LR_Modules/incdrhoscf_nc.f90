@@ -8,6 +8,31 @@
 !-----------------------------------------------------------------------
 subroutine incdrhoscf_nc (drhoscf, weight, ik, dbecsum, dpsi, rsign)
   !-----------------------------------------------------------------------
+  USE kinds,            ONLY : DP
+  USE ions_base,        ONLY : nat
+  USE fft_base,         ONLY : dfftp
+  USE wvfct,            ONLY : npwx, nbnd
+  USE uspp_param,       ONLY : nhm
+  USE noncollin_module, ONLY : npol, nspin_mag
+  USE lsda_mod,         ONLY : nspin
+  USE qpoint,           ONLY : ikks
+  USE control_lr,       ONLY : nbnd_occ
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: ik
+  REAL(DP), INTENT(IN) :: weight, rsign
+  COMPLEX(DP), INTENT(IN) :: dpsi(npwx*npol,nbnd)
+  COMPLEX(DP), INTENT(INOUT) :: drhoscf(dfftp%nnr,nspin_mag)
+  COMPLEX(DP), INTENT(INOUT) :: dbecsum(nhm,nhm,nat,nspin)
+  !
+  CALL incdrhoscf_nc_branch(drhoscf, weight, ik, dbecsum, dpsi, rsign, &
+                            nbnd_occ(ikks(ik)))
+  !
+END SUBROUTINE incdrhoscf_nc
+!-----------------------------------------------------------------------
+subroutine incdrhoscf_nc_branch (drhoscf, weight, ik, dbecsum, dpsi, &
+                                 rsign, nbnd_use)
+  !-----------------------------------------------------------------------
   !
   !     This routine computes the change of the charge density due to the
   !     perturbation. It is called at the end of the computation of the
@@ -25,7 +50,6 @@ subroutine incdrhoscf_nc (drhoscf, weight, ik, dbecsum, dpsi, rsign)
   USE wavefunctions, ONLY : evc
   USE klist,                ONLY : ngk,igk_k
   USE qpoint,               ONLY : ikks, ikqs
-  USE control_lr,           ONLY : nbnd_occ
   USE qpoint_aux,           ONLY : becpt
   USE lrus,                 ONLY : becp1
   USE mp_bands,             ONLY : me_bgrp, inter_bgrp_comm, ntask_groups
@@ -40,6 +64,8 @@ subroutine incdrhoscf_nc (drhoscf, weight, ik, dbecsum, dpsi, rsign)
   ! I/O variables
   INTEGER, INTENT(IN) :: ik
   ! input: the k point
+  INTEGER, INTENT(IN) :: nbnd_use
+  ! number of occupied source bands in the active Sternheimer branch
   REAL(DP), INTENT(IN) :: weight
   REAL(DP), INTENT(IN) :: rsign
   ! input: the weight of the k point
@@ -110,7 +136,7 @@ subroutine incdrhoscf_nc (drhoscf, weight, ik, dbecsum, dpsi, rsign)
   ! evc  contains the unperturbed wavefunctions of this k point
   !
   !$acc data copyin(dpsi(1:npwx*npol,1:nbnd)) copy(drhoscf(1:v_sizp,1:nspin_mag)) create(psi(1:v_siz,1:npol),dpsic(1:v_siz,1:npol)) present(igk_k) deviceptr(evc_d, nl_d)
-  do ibnd = 1, nbnd_occ(ikk), incr
+  do ibnd = 1, nbnd_use, incr
 
      IF (dffts%has_task_groups) THEN
 #if defined(__CUDA)
@@ -130,7 +156,7 @@ subroutine incdrhoscf_nc (drhoscf, weight, ik, dbecsum, dpsi, rsign)
            ! ... dtgs%nogrp ffts at the same time. We prepare both
            ! evc (at k) and dpsi (at k+q)
            !
-           IF( idx + ibnd - 1 <= nbnd_occ(ikk) ) THEN
+           IF( idx + ibnd - 1 <= nbnd_use ) THEN
               !
               DO ig = 1, npw
                  tg_psi( dffts%nl( igk_k( ig,ikk ) ) + ioff, 1 ) = evc( ig, idx+ibnd-1 )
@@ -257,4 +283,4 @@ subroutine incdrhoscf_nc (drhoscf, weight, ik, dbecsum, dpsi, rsign)
   !
   RETURN
   !
-end subroutine incdrhoscf_nc
+end subroutine incdrhoscf_nc_branch

@@ -465,7 +465,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   USE noncollin_module, ONLY : npol, domag
   USE lsda_mod,      ONLY : nspin
   USE control_ph,    ONLY : rec_code_read
-  USE control_lr,    ONLY : lgamma
+  USE control_lr,    ONLY : lgamma, nbnd_occ
   USE units_lr,      ONLY : iuwfc, lrwfc, iudwf, lrdwf
   USE wavefunctions, ONLY : evc
   USE buffers,       ONLY : get_buffer
@@ -476,7 +476,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: irr, nu_i0, nper
-  INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npwq
+  INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npwq, nbnd_branch
   INTEGER :: ipert, imode, jmode, nrec, ibnd, nt, nah, m1, m2, is
   REAL(DP) :: lmetq0
   COMPLEX(DP), ALLOCATABLE :: dyn1(:,:), dvhub(:,:)
@@ -499,6 +499,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
         ELSE
            ikmk = ikmks(ik)
         ENDIF
+        nbnd_branch = nbnd_occ(ikmk)
         npwq = ngk(ikq)
         CALL get_buffer(evc,lrwfc,iuwfc,ikmk)
         DO imode = 1, nmodes
@@ -506,7 +507,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
            DO ipert = 1, nper
               nrec = (isolv-1)*nper*nksq + (ipert-1)*nksq + ik
               CALL get_buffer(dpsi,lrdwf,iudwf,nrec)
-              DO ibnd = 1, nbnd
+              DO ibnd = 1, nbnd_branch
                  prj = DOT_PRODUCT(dpsi(1:npwq,ibnd),dvhub(1:npwq,ibnd)) + &
                       DOT_PRODUCT(dpsi(npwx+1:npwx+npwq,ibnd), &
                                   dvhub(npwx+1:npwx+npwq,ibnd))

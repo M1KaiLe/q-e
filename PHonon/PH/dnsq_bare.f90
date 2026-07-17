@@ -353,11 +353,12 @@ SUBROUTINE dnsq_bare_nc()
   USE io_files,      ONLY : nwordwfcU, seqopn
   USE units_lr,      ONLY : iuwfc, lrwfc, iuatwfc, iuatswfc
   USE ions_base,     ONLY : nat, ityp
-  USE klist,         ONLY : ngk, igk_k
+  USE klist,         ONLY : ngk, igk_k, wk, lgauss, degauss, ngauss
   USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, offsetU, is_hubbard, nwfcU
   USE ldaU_ph,       ONLY : wfcatomk, dnsbare, dnsbare_all_modes, read_dns_bare
   USE ldaU_lr,       ONLY : swfcatomk
-  USE wvfct,         ONLY : npwx, wg, nbnd
+  USE wvfct,         ONLY : npwx, wg, nbnd, et
+  USE ener,          ONLY : ef
   USE qpoint,        ONLY : nksq, ikks
   USE qpoint_aux,    ONLY : ikmks
   USE noncollin_module, ONLY : npol, domag
@@ -387,6 +388,8 @@ SUBROUTINE dnsq_bare_nc()
   COMPLEX(DP), ALLOCATABLE :: dphi(:,:), dtmp(:)
   COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:)
   COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:,:)
+  REAL(DP), ALLOCATABLE :: band_weight(:)
+  REAL(DP), EXTERNAL :: wgauss
   !
   IF (npol /= 2 .OR. nspin /= 4) CALL errore('dnsq_bare_nc', &
        'inconsistent noncollinear spin dimensions', 1)
@@ -394,6 +397,7 @@ SUBROUTINE dnsq_bare_nc()
   ALLOCATE(dphi(npwx*npol,nwfcU), dtmp(npwx))
   ALLOCATE(proj(nbnd,nwfcU), dproj(nbnd,nwfcU))
   ALLOCATE(dns_branch(ldim,ldim,4,nat,3,nat))
+  ALLOCATE(band_weight(nbnd))
   dnsbare = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag)
   !
@@ -425,10 +429,17 @@ SUBROUTINE dnsq_bare_nc()
             ENDIF
            ! apply_trev stores the second branch in the direct-k G ordering.
            npw = ngk(ikk)
-           CALL get_buffer(evc, lrwfc, iuwfc, ikmk)
-           CALL get_buffer(wfcatomk, nwordwfcU, iuatwfc, ikk)
-           CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
-           !
+            CALL get_buffer(evc, lrwfc, iuwfc, ikmk)
+            CALL get_buffer(wfcatomk, nwordwfcU, iuatwfc, ikk)
+            CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
+            band_weight = wg(:,ikk)
+            IF (isolv == 2 .AND. lgauss) THEN
+               DO ibnd = 1, nbnd
+                  band_weight(ibnd) = wk(ikk) * &
+                       wgauss((ef-et(ibnd,ikmk))/degauss,ngauss)
+               END DO
+            ENDIF
+            !
            proj = (0.0_DP, 0.0_DP)
            DO nah = 1, nat
               nt = ityp(nah)
@@ -503,7 +514,7 @@ SUBROUTINE dnsq_bare_nc()
                                  DO ibnd = 1, nbnd
                                      dns_branch(m1,m2,is,nah,icart,na) = &
                                           dns_branch(m1,m2,is,nah,icart,na) + &
-                                          REAL(bsign,DP) * wg(ibnd,ikk) * &
+                                          REAL(bsign,DP) * band_weight(ibnd) * &
                                           CONJG(proj(ibnd,ihubst1)) * &
                                           dproj(ibnd,ihubst2)
                                       ! Complete the nonmagnetic spinor response
@@ -517,7 +528,7 @@ SUBROUTINE dnsq_bare_nc()
                                               ldim_nt*(sket_k-1)
                                          dns_branch(m1,m2,is,nah,icart,na) = &
                                               dns_branch(m1,m2,is,nah,icart,na) + &
-                                              REAL(ksign,DP) * wg(ibnd,ikk) * &
+                                              REAL(ksign,DP) * band_weight(ibnd) * &
                                               CONJG(proj(ibnd,ihubst1_k)) * &
                                               dproj(ibnd,ihubst2_k)
                                       ENDIF
@@ -552,6 +563,6 @@ SUBROUTINE dnsq_bare_nc()
      WRITE(ipattern,*) dnsbare_all_modes
      CLOSE(ipattern,STATUS='keep')
   ENDIF
-  DEALLOCATE(dphi, dtmp, proj, dproj, dns_branch)
+  DEALLOCATE(dphi, dtmp, proj, dproj, dns_branch, band_weight)
 END SUBROUTINE dnsq_bare_nc
 !----------------------------------------------------------------------------

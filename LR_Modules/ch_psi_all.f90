@@ -27,7 +27,7 @@ SUBROUTINE ch_psi_all (n, h, ah, e, ik, m)
   USE mp_bands,             ONLY : use_bgrp_in_hpsi, inter_bgrp_comm, intra_bgrp_comm
   USE xc_lib,               ONLY : exx_is_active
   USE mp,                   ONLY : mp_sum
-  USE control_lr,           ONLY : alpha_pv, nbnd_occ, lgamma
+  USE control_lr,           ONLY : alpha_pv, nbnd_occ, lgamma, current_ikq_occ
   USE control_flags,        ONLY : gamma_only, offload_type
   USE wavefunctions,        ONLY : evc
   USE buffers,              ONLY : get_buffer
@@ -171,6 +171,7 @@ CONTAINS
 
     ALLOCATE (ps  ( nbnd , m))
     k = nbnd_occ (ikqs(ik))
+    IF (current_ikq_occ > 0) k = nbnd_occ(current_ikq_occ)
     CALL start_clock_gpu ('ch_psi_all_k')
     !
     !$acc data create( ps(1:nbnd, 1:m) ) present(evq, hpsi, spsi)

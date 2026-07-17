@@ -348,7 +348,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   INTEGER, INTENT(IN) :: npe, imode0, irr
   LOGICAL, INTENT(IN) :: lmetq0, lflag
   !
-  INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npw, npwq
+  INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npw, npwq, nbnd_branch
   INTEGER :: ipert, nrec, ibnd, nah, nt, ldim, ldim_nt
   INTEGER :: m, m1, m2, is1, is2, is, ihubst, ihubst1, ihubst2
   INTEGER :: mbra, mket, sbra, sket, bsign, ksign
@@ -379,6 +379,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
         ELSE
            ikmk = ikmks(ik)
         ENDIF
+        nbnd_branch = nbnd_occ(ikmk)
         ! The time-reversed records are stored with direct-k G ordering by
         ! apply_trev.  Keep projector buffers and plane-wave maps at k,k+q.
         npw = ngk(ikk)
@@ -401,7 +402,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
               DO is1 = 1, 2
                  DO m = 1, ldim_nt
                     ihubst = offsetU(nah) + m + ldim_nt*(is1-1)
-                    DO ibnd = 1, nbnd_occ(ikk)
+                    DO ibnd = 1, nbnd_branch
                        proj1(ibnd,ihubst) = DOT_PRODUCT( &
                             swfcatomk(1:npw,ihubst), evc(1:npw,ibnd)) + &
                             DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ihubst), &
@@ -430,7 +431,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
                                    mbra,mket,sbra,sket,bsign)
                               ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
                               ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
-                              DO ibnd = 1, nbnd_occ(ikk)
+                              DO ibnd = 1, nbnd_branch
                                   dns_branch(m1,m2,is,nah,ipert) = &
                                        dns_branch(m1,m2,is,nah,ipert) + &
                                        REAL(bsign,DP) * wk(ikk) * &
@@ -454,11 +455,19 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
                                  IF (lmetq0 .AND. isolv == 1) THEN
                                     wdelta = w0gauss((ef-et(ibnd,ikk))/degauss,ngauss) / degauss
                                     w1 = wk(ikk) * wdelta
+                                    IF (.NOT. domag) w1 = 0.5_DP * w1
                                     dns_branch(m1,m2,is,nah,ipert) = &
                                          dns_branch(m1,m2,is,nah,ipert) + &
                                          w1 * def(ipert) * CONJG(proj1(ibnd, &
                                          offsetU(nah)+m1+ldim_nt*(is1-1))) * &
                                          proj1(ibnd,offsetU(nah)+m2+ldim_nt*(is2-1))
+                                    IF (.NOT. domag) THEN
+                                       dns_branch(m1,m2,is,nah,ipert) = &
+                                            dns_branch(m1,m2,is,nah,ipert) + &
+                                            REAL(ksign,DP) * w1 * def(ipert) * &
+                                            CONJG(proj1(ibnd,ihubst1_k)) * &
+                                            proj1(ibnd,ihubst2_k)
+                                    ENDIF
                              ENDIF
                           END DO
                        END DO

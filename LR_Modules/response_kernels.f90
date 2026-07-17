@@ -72,7 +72,7 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
    USE uspp_init,             ONLY : init_us_2
    USE ldaU,                  ONLY : lda_plus_u
    USE units_lr,              ONLY : iuwfc, lrwfc, lrdwf, iudwf
-   USE control_lr,            ONLY : nbnd_occ, lgamma
+   USE control_lr,            ONLY : nbnd_occ, lgamma, current_ikq_occ
    USE qpoint,                ONLY : nksq, ikks, ikqs
    USE qpoint_aux,            ONLY : ikmks, ikmkmqs, becpt
    USE eqv,                   ONLY : dpsi, dvpsi, evq
@@ -112,6 +112,7 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
    LOGICAL :: exclude_hubbard_
    !! Local variable to set the default of exclude_hubbard to false
    INTEGER :: ikk, ikq, npw, npwq, ipert, num_iter, ik, nrec, ikmk, ikmkmq
+   INTEGER :: nbnd_branch
    !! counters
    INTEGER :: tot_num_iter
    !! total number of iterations in cgsolve_all
@@ -135,6 +136,7 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
    !
    exclude_hubbard_ = .FALSE.
    IF (PRESENT(exclude_hubbard)) exclude_hubbard_ = exclude_hubbard
+   current_ikq_occ = 0
    !
    ALLOCATE(h_diag(npwx*npol, nbnd))
    ALLOCATE(aux2(npwx*npol, nbnd))
@@ -162,6 +164,8 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
          ikmkmq = ikq
          rsign = 1.0_DP
       ENDIF
+      nbnd_branch = nbnd_occ(ikmk)
+      current_ikq_occ = ikmkmq
       !
       IF (lsda) current_spin = isk(ikk)
       !
@@ -186,7 +190,7 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
       !
       ! compute preconditioning matrix h_diag used by cgsolve_all
       !
-      CALL h_prec(ik, evq, h_diag)
+      CALL h_prec_branch(ik, evq, h_diag, nbnd_branch)
       !
       DO ipert = 1, npert
          !
@@ -202,7 +206,7 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
             ! calculates dvscf_q*psi_k in G_space, for all bands, k=kpoint
             ! dvscf_q from previous iteration (mix_potential)
             !
-            CALL apply_dpot_bands(ik, nbnd_occ(ikk), dvscfins(:, :, ipert), evc, aux2)
+            CALL apply_dpot_bands(ik, nbnd_branch, dvscfins(:, :, ipert), evc, aux2)
             dvpsi = dvpsi + aux2
             !
             !  In the case of US pseudopotentials there is an additional
@@ -220,8 +224,8 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
             !
             IF (lda_plus_u .AND. (.NOT. exclude_hubbard_)) THEN
                IF (noncolin) THEN
-                   CALL adddvhubscf_nc(ipert, ik, time_reversed)
-                ELSE
+                  CALL adddvhubscf_nc(ipert, ik, time_reversed)
+               ELSE
                   CALL adddvhubscf(ipert, ik)
                ENDIF
             ENDIF
@@ -251,9 +255,8 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
          !
          conv_root = .TRUE.
          !
-         ! TODO: should nbnd_occ(ikk) be nbnd_occ(ikmk)?
          CALL cgsolve_all(ch_psi_all, cg_psi, et(1, ikmk), dvpsi, dpsi, h_diag, &
-            npwx, npwq, thresh, ik, num_iter, conv_root, anorm, nbnd_occ(ikk), npol)
+            npwx, npwq, thresh, ik, num_iter, conv_root, anorm, nbnd_branch, npol)
          !
          tot_num_iter = tot_num_iter + num_iter
          tot_cg_calls = tot_cg_calls + 1
@@ -271,13 +274,14 @@ SUBROUTINE sternheimer_kernel(first_iter, time_reversed, npert, lrdvpsi, iudvpsi
          ! calculates dvscf, sum over k => dvscf_q_ipert
          !
          IF (noncolin) THEN
-            CALL incdrhoscf_nc(drhoout(1,1,ipert), wk(ikk), ik, &
-                               dbecsum_nc(1,1,1,1,ipert), dpsi, rsign)
+            CALL incdrhoscf_nc_branch(drhoout(1,1,ipert), wk(ikk), ik, &
+                 dbecsum_nc(1,1,1,1,ipert), dpsi, rsign, nbnd_branch)
          ELSE
             CALL incdrhoscf(drhoout(1,current_spin,ipert), wk(ikk), &
                             ik, dbecsum(1,1,current_spin,ipert), dpsi)
          ENDIF
       ENDDO ! ipert
+      current_ikq_occ = 0
    ENDDO ! ik
    !
    CALL mp_sum(tot_num_iter, inter_pool_comm)

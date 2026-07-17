@@ -406,6 +406,7 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
   USE lsda_mod,      ONLY : nspin
   USE wavefunctions, ONLY : evc
   USE qpoint,        ONLY : ikks, ikqs
+  USE qpoint_aux,    ONLY : ikmks
   USE klist,         ONLY : ngk, igk_k
   USE control_lr,    ONLY : nbnd_occ, lgamma
   USE scf,           ONLY : v
@@ -421,7 +422,7 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
   LOGICAL, INTENT(IN) :: time_reversed
   LOGICAL, INTENT(IN) :: include_dnsbare
   COMPLEX(DP), INTENT(OUT) :: dvhub_out(npwx*npol,nbnd)
-  INTEGER :: ikk, ikq, npw, npwq, ldim, ldim_nt
+  INTEGER :: ikk, ikq, ikmk, npw, npwq, ldim, ldim_nt, nbnd_branch
   INTEGER :: na, nt, icart, ip, is1, is2, js, is, m, m1, m2
   INTEGER :: ia, ib, ibnd, ig
   REAL(DP), ALLOCATABLE :: u_atom(:)
@@ -433,6 +434,12 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
        'inconsistent noncollinear spin dimensions', 1)
   ikk = ikks(ik)
   ikq = ikqs(ik)
+  IF (time_reversed) THEN
+     ikmk = ikmks(ik)
+  ELSE
+     ikmk = ikk
+  ENDIF
+  nbnd_branch = nbnd_occ(ikmk)
   ! The time-reversed wavefunction records use direct k,k+q G ordering.
   npw = ngk(ikk)
   npwq = ngk(ikq)
@@ -487,7 +494,7 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
      DO is2 = 1, 2
         DO m2 = 1, ldim_nt
            ib = offsetU(na) + m2 + ldim_nt*(is2-1)
-           DO ibnd = 1, nbnd_occ(ikk)
+           DO ibnd = 1, nbnd_branch
               proj(ibnd,ib) = DOT_PRODUCT(swfcatomk(1:npw,ib),evc(1:npw,ibnd)) + &
                    DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ib), &
                                evc(npwx+1:npwx+npw,ibnd))
@@ -535,7 +542,7 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
               ia = offsetU(na) + m1 + ldim_nt*(is1-1)
               DO m2 = 1, ldim_nt
                  ib = offsetU(na) + m2 + ldim_nt*(is2-1)
-                 DO ibnd = 1, nbnd_occ(ikk)
+                 DO ibnd = 1, nbnd_branch
                     DO ig = 1, npwq
                        dvhub_out(ig,ibnd) = dvhub_out(ig,ibnd) + &
                             dphikq(ig,ia)*vhub(m1,m2,is,na)*proj(ibnd,ib) + &
