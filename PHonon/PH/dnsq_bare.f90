@@ -380,6 +380,7 @@ SUBROUTINE dnsq_bare_nc()
   INTEGER :: is1, is2, js, is, m, m1, m2, ldim, ldim_nt
   INTEGER :: ihubst, ihubst1, ihubst2, iunit, ipattern, ios
   INTEGER :: mbra, mket, sbra, sket, ksign
+  INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
   LOGICAL :: exst, valid_restart
   CHARACTER(LEN=80) :: header
   CHARACTER(LEN=6), EXTERNAL :: int_to_char
@@ -505,19 +506,21 @@ SUBROUTINE dnsq_bare_nc()
                                           wg(ibnd,ikk) * &
                                           CONJG(proj(ibnd,ihubst1)) * &
                                           dproj(ibnd,ihubst2)
-                                     ! Complete the nonmagnetic spinor response
-                                     ! with its fixed-q Kramers bra partner.
-                                     IF (.NOT. domag) THEN
-                                        CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
-                                             mbra,mket,sbra,sket,ksign)
-                                        ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
-                                        ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
-                                        dns_branch(m1,m2,is,nah,icart,na) = &
-                                             dns_branch(m1,m2,is,nah,icart,na) + &
-                                             REAL(ksign,DP) * wg(ibnd,ikk) * &
-                                             CONJG(proj(ibnd,ihubst1)) * &
-                                             dproj(ibnd,ihubst2)
-                                     ENDIF
+                                      ! Complete the nonmagnetic spinor response
+                                      ! with its fixed-q Kramers bra partner.
+                                      IF (.NOT. domag) THEN
+                                         CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
+                                              mbra_k,mket_k,sbra_k,sket_k,ksign)
+                                         ihubst1_k = offsetU(nah) + mbra_k + &
+                                              ldim_nt*(sbra_k-1)
+                                         ihubst2_k = offsetU(nah) + mket_k + &
+                                              ldim_nt*(sket_k-1)
+                                         dns_branch(m1,m2,is,nah,icart,na) = &
+                                              dns_branch(m1,m2,is,nah,icart,na) + &
+                                              REAL(ksign,DP) * wg(ibnd,ikk) * &
+                                              CONJG(proj(ibnd,ihubst1_k)) * &
+                                              dproj(ibnd,ihubst2_k)
+                                      ENDIF
                                 END DO
                              END DO
                           END DO

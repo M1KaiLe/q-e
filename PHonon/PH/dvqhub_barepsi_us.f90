@@ -462,9 +462,10 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
               DO js = 1, 2
                   CALL dwfc(npw, igk_k(1,ikk), ikk, icart, &
                       wfcatomk(1+(js-1)*npwx,ia), dtmp)
+                 ! DOT_PRODUCT conjugates this bra-side vector.
                  dphik(1+(js-1)*npwx:npw+(js-1)*npwx,ia) = &
                       dphik(1+(js-1)*npwx:npw+(js-1)*npwx,ia) + &
-                      uact(ip) * dtmp(1:npw)
+                      CONJG(uact(ip)) * dtmp(1:npw)
                   CALL dwfc(npwq, igk_k(1,ikq), ikq, icart, &
                       wfcatomkpq(1+(js-1)*npwx,ia), dtmp)
                  dphikq(1+(js-1)*npwx:npwq+(js-1)*npwx,ia) = &

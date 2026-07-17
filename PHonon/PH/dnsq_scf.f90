@@ -352,6 +352,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   INTEGER :: ipert, nrec, ibnd, nah, nt, ldim, ldim_nt
   INTEGER :: m, m1, m2, is1, is2, is, ihubst, ihubst1, ihubst2
   INTEGER :: mbra, mket, sbra, sket, ksign
+  INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
   REAL(DP) :: wdelta, w1
   COMPLEX(DP), ALLOCATABLE :: dpsi(:,:), proj1(:,:), proj2(:,:)
   COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:)
@@ -434,19 +435,21 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
                                        dns_branch(m1,m2,is,nah,ipert) + &
                                        wk(ikk) * CONJG(proj1(ibnd,ihubst1)) * &
                                        proj2(ibnd,ihubst2)
-                                  ! The single nonmagnetic solve supplies its
-                                  ! fixed-q bra half through J R^T J^dagger.
-                                  IF (.NOT. domag) THEN
-                                     CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
-                                          mbra,mket,sbra,sket,ksign)
-                                     ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
-                                     ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
-                                     dns_branch(m1,m2,is,nah,ipert) = &
-                                          dns_branch(m1,m2,is,nah,ipert) + &
-                                          REAL(ksign,DP) * wk(ikk) * &
-                                          CONJG(proj1(ibnd,ihubst1)) * &
-                                          proj2(ibnd,ihubst2)
-                                  ENDIF
+                                   ! The single nonmagnetic solve supplies its
+                                   ! fixed-q bra half through J R^T J^dagger.
+                                   IF (.NOT. domag) THEN
+                                      CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
+                                           mbra_k,mket_k,sbra_k,sket_k,ksign)
+                                      ihubst1_k = offsetU(nah) + mbra_k + &
+                                           ldim_nt*(sbra_k-1)
+                                      ihubst2_k = offsetU(nah) + mket_k + &
+                                           ldim_nt*(sket_k-1)
+                                      dns_branch(m1,m2,is,nah,ipert) = &
+                                           dns_branch(m1,m2,is,nah,ipert) + &
+                                           REAL(ksign,DP) * wk(ikk) * &
+                                           CONJG(proj1(ibnd,ihubst1_k)) * &
+                                           proj2(ibnd,ihubst2_k)
+                                   ENDIF
                                  IF (lmetq0 .AND. isolv == 1) THEN
                                     wdelta = w0gauss((ef-et(ibnd,ikk))/degauss,ngauss) / degauss
                                     w1 = wk(ikk) * wdelta
