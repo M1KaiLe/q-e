@@ -412,7 +412,8 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
   USE mp,            ONLY : mp_sum
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_dv_from_dns_nc, &
-                                  hubbard_time_reverse_inplace_nc
+                                  hubbard_time_reverse_inplace_nc, &
+                                  hubbard_response_branch_inplace_nc
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: ik
@@ -519,7 +520,7 @@ SUBROUTINE dvqhub_barepsi_nc(ik, uact, time_reversed, &
   vhub = v%ns_nc
   IF (time_reversed) THEN
      CALL hubbard_time_reverse_inplace_nc(ldim,nat,vhub)
-     CALL hubbard_time_reverse_inplace_nc(ldim,nat,dvbare)
+     CALL hubbard_response_branch_inplace_nc(ldim,nat,dvbare)
   ENDIF
   !
   dvhub_out = (0.0_DP, 0.0_DP)

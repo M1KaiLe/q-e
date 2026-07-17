@@ -72,6 +72,18 @@ PROGRAM test_hubbard_nc_response
   CALL hubbard_kramers_partner_nc(ldim,nat,a,b)
   CALL check_array(b,dns,'Kramers partner squared',failures)
 
+  a = dns
+  CALL hubbard_response_branch_inplace_nc(ldim,nat,a)
+  CALL hubbard_kramers_partner_nc(ldim,nat,dns,b)
+  CALL check_array(a,b,'finite-q response branch transpose',failures)
+  CALL hubbard_time_reverse_nc(ldim,nat,dns,b)
+  IF (MAXVAL(ABS(a-b)) <= tol) THEN
+     WRITE(*,'(A)') 'FAIL finite-q transpose confused with complex conjugation'
+     failures = failures + 1
+  ENDIF
+  CALL hubbard_response_branch_inplace_nc(ldim,nat,a)
+  CALL check_array(a,dns,'finite-q response branch squared',failures)
+
   a = (0.0_DP,0.0_DP)
   DO is1 = 1, 2
      DO is2 = 1, 2

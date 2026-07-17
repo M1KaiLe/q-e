@@ -22,6 +22,7 @@ MODULE hubbard_nc_response
   PUBLIC :: hubbard_branch_indices_nc
   PUBLIC :: hubbard_kramers_indices_nc
   PUBLIC :: hubbard_kramers_partner_nc
+  PUBLIC :: hubbard_response_branch_inplace_nc
   PUBLIC :: hubbard_dv_from_dns_nc
   PUBLIC :: hubbard_reverse_magnetization_nc
   PUBLIC :: hubbard_time_reverse_nc
@@ -103,6 +104,18 @@ CONTAINS
     END DO
   END SUBROUTINE hubbard_kramers_partner_nc
   !
+  SUBROUTINE hubbard_response_branch_inplace_nc(ldim, nat, matrix)
+    !! Transform a finite-q response operator for the magnetic -B branch.
+    !! Since dV(-q)=dV(q)^dagger, Theta dV(-q) Theta^-1 is
+    !! J dV(q)^T J^dagger, without complex conjugation.
+    INTEGER, INTENT(IN) :: ldim, nat
+    COMPLEX(DP), INTENT(INOUT) :: matrix(ldim, ldim, 4, nat)
+    COMPLEX(DP) :: tmp(ldim, ldim, 4, nat)
+    !
+    CALL hubbard_kramers_partner_nc(ldim, nat, matrix, tmp)
+    matrix = tmp
+  END SUBROUTINE hubbard_response_branch_inplace_nc
+  !
   SUBROUTINE hubbard_dv_from_dns_nc(ldim, nat, u_atom, dns, dvhub)
     !! Linearized Dudarev potential: dV_ab = -U dN_ba.
     INTEGER, INTENT(IN) :: ldim, nat
@@ -156,7 +169,8 @@ CONTAINS
   END SUBROUTINE hubbard_time_reverse_nc
   !
   SUBROUTINE hubbard_time_reverse_inplace_nc(ldim, nat, matrix)
-    !! In-place wrapper used while switching the magnetic Sternheimer branch.
+    !! Antiunitary in-place transform for a static operator when switching
+    !! the magnetic Sternheimer branch.
     INTEGER, INTENT(IN) :: ldim, nat
     COMPLEX(DP), INTENT(INOUT) :: matrix(ldim, ldim, 4, nat)
     COMPLEX(DP) :: tmp(ldim, ldim, 4, nat)

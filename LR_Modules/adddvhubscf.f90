@@ -238,7 +238,7 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
   USE mp,            ONLY : mp_sum
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_dv_from_dns_nc, &
-                                  hubbard_time_reverse_inplace_nc
+                                  hubbard_response_branch_inplace_nc
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: ipert, ik
@@ -267,7 +267,9 @@ SUBROUTINE adddvhubscf_nc(ipert, ik, time_reversed)
   END DO
   CALL hubbard_dv_from_dns_nc(ldim, nat, u_atom, &
        dnsscf(:,:,:,:,ipert), dvhubmat)
-  IF (time_reversed) CALL hubbard_time_reverse_inplace_nc(ldim,nat,dvhubmat)
+  IF (time_reversed) THEN
+     CALL hubbard_response_branch_inplace_nc(ldim,nat,dvhubmat)
+  ENDIF
   !
   CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
   IF (.NOT. lgamma) CALL get_buffer(swfcatomkpq, nwordwfcU, iuatswfc, ikq)
