@@ -143,8 +143,9 @@ SUBROUTINE ef_shift_wfc(npert, ldoss, drhoscf)
   USE wvfct,                ONLY : npwx, et
   USE klist,                ONLY : degauss, ngauss, ngk, ltetra
   USE ener,                 ONLY : ef
-  USE noncollin_module,     ONLY : noncolin, npol, nspin_mag
-  USE qpoint,               ONLY : nksq
+  USE noncollin_module,     ONLY : noncolin, domag, npol, nspin_mag
+  USE qpoint,               ONLY : nksq, ikks
+  USE qpoint_aux,           ONLY : ikmks
   USE control_lr,           ONLY : nbnd_occ
   USE units_lr,             ONLY : iuwfc, lrwfc, lrdwf, iudwf
   USE eqv,                  ONLY : dpsi
@@ -163,7 +164,7 @@ SUBROUTINE ef_shift_wfc(npert, ldoss, drhoscf)
   !
   ! local variables
   !
-  INTEGER :: npw, ibnd, ik, is, ipert, nrec, ikrec
+  INTEGER :: npw, ibnd, ik, ikk, is, ipert, nrec, ikrec, isolv, nsolv
   ! counter on occupied bands
   ! counter on k-point
   ! counter on spin polarizations
@@ -185,37 +186,51 @@ SUBROUTINE ef_shift_wfc(npert, ldoss, drhoscf)
   !
   ! Update the perturbed wavefunctions according to the Fermi energy shift
   !
+  nsolv = 1
+  IF (noncolin .AND. domag) nsolv = 2
+  ! The physical magnetic response averages direct and time-reversed
+  ! Sternheimer records, so the Fermi-surface shift must update both.
   do ik = 1, nksq
-     npw = ngk (ik)
+     ! ik is the q-local index.  In the magnetic Gamma layout the
+     ! corresponding direct wavefunction record is ikks(ik)=2*ik-1;
+     ! using ik here applies the Fermi shift to the wrong state.
+     ikk = ikks(ik)
+     npw = ngk (ikk)
      !
      ! reads unperturbed wavefuctions psi_k in G_space, for all bands
      !
-     ikrec = ik
-     if (nksq > 1) call get_buffer (evc, lrwfc, iuwfc, ikrec)
-     !
-     ! reads delta_psi from iunit iudwf, k=kpoint
-     !
-     do ipert = 1, npert
-        nrec = (ipert - 1) * nksq + ik
-        IF (nksq > 1 .OR. npert > 1) CALL get_buffer(dpsi, lrdwf, iudwf, nrec)
-        do ibnd = 1, nbnd_occ (ik)
+     do isolv = 1, nsolv
+        ikrec = ikk
+        if (isolv == 2) ikrec = ikmks(ik)
+        if (nksq > 1 .or. nsolv == 2) call get_buffer (evc, lrwfc, iuwfc, ikrec)
+        !
+        ! reads delta_psi from iunit iudwf, k=kpoint
+        !
+        do ipert = 1, npert
+           nrec = (isolv - 1) * npert * nksq + (ipert - 1) * nksq + ik
+           IF (nksq > 1 .OR. npert > 1 .OR. nsolv == 2) &
+                CALL get_buffer(dpsi, lrdwf, iudwf, nrec)
+           do ibnd = 1, nbnd_occ (ikrec)
+              !
+              if(ltetra) then
+                 wfshift = 0.5d0 * def(ipert) * dfpt_tetra_delta(ibnd,ikrec)
+              else
+                 wfshift = 0.5d0 * def(ipert) * w0gauss( &
+                      (ef-et(ibnd,ikrec))/degauss, ngauss) / degauss
+              end if
+              !
+              IF (noncolin) THEN
+                 call zaxpy (npwx*npol,wfshift,evc(1,ibnd),1,dpsi(1,ibnd),1)
+              ELSE
+                 call zaxpy (npw, wfshift, evc(1,ibnd), 1, dpsi(1,ibnd), 1)
+              ENDIF
+           enddo
            !
-           if(ltetra) then
-              wfshift = 0.5d0 * def(ipert) * dfpt_tetra_delta(ibnd,ik)
-           else
-              wfshift = 0.5d0 * def(ipert) * w0gauss( (ef-et(ibnd,ik))/degauss, ngauss) / degauss
-           end if
+           ! writes corrected delta_psi to iunit iudwf, k=kpoint,
            !
-           IF (noncolin) THEN
-              call zaxpy (npwx*npol,wfshift,evc(1,ibnd),1,dpsi(1,ibnd),1)
-           ELSE
-              call zaxpy (npw, wfshift, evc(1,ibnd), 1, dpsi(1,ibnd), 1)
-           ENDIF
+           IF (nksq > 1 .OR. npert > 1 .OR. nsolv == 2) &
+                CALL save_buffer(dpsi, lrdwf, iudwf, nrec)
         enddo
-        !
-        ! writes corrected delta_psi to iunit iudwf, k=kpoint,
-        !
-        IF (nksq > 1 .OR. npert > 1) CALL save_buffer(dpsi, lrdwf, iudwf, nrec)
      enddo
   enddo
   !

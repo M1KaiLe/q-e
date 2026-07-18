@@ -55,7 +55,10 @@ CONTAINS
   PURE SUBROUTINE hubbard_branch_indices_nc(branch, m1, m2, is1, is2, &
                                              mbra, mket, sbra, sket, sign)
     !! Projector indices for the magnetic two-Sternheimer construction.
-    !! The -B solution supplies J (delta N)^T J^dagger, J=i*sigma_y.
+    !! apply_trev has already applied J*K to the second set of wavefunctions,
+    !! so the -B overlap supplies the missing bra term through an ordinary
+    !! transpose of the combined orbital-spin indices.  Applying J here again
+    !! would time-reverse the spin indices twice.
     INTEGER, INTENT(IN) :: branch, m1, m2, is1, is2
     INTEGER, INTENT(OUT) :: mbra, mket, sbra, sket, sign
     IF (branch == 1) THEN
@@ -65,8 +68,11 @@ CONTAINS
        sket = is2
        sign = 1
     ELSE
-       CALL hubbard_kramers_indices_nc(m1, m2, is1, is2, &
-                                       mbra, mket, sbra, sket, sign)
+       mbra = m2
+       mket = m1
+       sbra = is2
+       sket = is1
+       sign = 1
     ENDIF
   END SUBROUTINE hubbard_branch_indices_nc
   !

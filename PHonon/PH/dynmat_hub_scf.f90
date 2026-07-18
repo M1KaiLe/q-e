@@ -473,6 +473,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   USE mp,            ONLY : mp_sum
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE mp_pools,      ONLY : inter_pool_comm
+  USE hubbard_nc_response, ONLY : hub_spin_transpose
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: irr, nu_i0, nper
@@ -532,9 +533,12 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
            DO is = 1, 4
               DO m1 = 1, 2*Hubbard_l(nt)+1
                  DO m2 = 1, 2*Hubbard_l(nt)+1
-                    cross = cross - Hubbard_U(nt) * &
-                         CONJG(dnsscf(m1,m2,is,nah,ipert)) * &
-                         dnsbare_all_modes(m1,m2,is,nah,imode)
+                     ! dV^U_(m1 s1,m2 s2) = -U * dn_(m2 s2,m1 s1).
+                     ! Contract the SCF and bare responses with this joint
+                     ! orbital-spin transpose, including ud/du blocks.
+                     cross = cross - Hubbard_U(nt) * &
+                          CONJG(dnsscf(m1,m2,is,nah,ipert)) * &
+                          dnsbare_all_modes(m2,m1,hub_spin_transpose(is),nah,imode)
                  END DO
               END DO
            END DO

@@ -39,9 +39,9 @@ PROGRAM test_hubbard_nc_response
              mbra,mket,sbra,sket,bsign)
         CALL check_int(mbra,2,'time-reversed branch bra orbital',failures)
         CALL check_int(mket,1,'time-reversed branch ket orbital',failures)
-        CALL check_int(sbra,3-is2,'time-reversed branch bra spin',failures)
-        CALL check_int(sket,3-is1,'time-reversed branch ket spin',failures)
-        CALL check_int(bsign,MERGE(1,-1,is1==is2), &
+        CALL check_int(sbra,is2,'time-reversed branch bra spin',failures)
+        CALL check_int(sket,is1,'time-reversed branch ket spin',failures)
+        CALL check_int(bsign,1, &
              'time-reversed branch sign',failures)
      END DO
   END DO
@@ -102,8 +102,18 @@ PROGRAM test_hubbard_nc_response
         END DO
      END DO
   END DO
+  DO is1 = 1, 2
+     DO is2 = 1, 2
+        is = hub_spin_index(is1,is2)
+        b(:,:,is,1) = TRANSPOSE(dns(:,:,hub_spin_index(is2,is1),1))
+     END DO
+  END DO
+  CALL check_array(a,b,'magnetic branch-2 combined transpose',failures)
   CALL hubbard_kramers_partner_nc(ldim,nat,dns,b)
-  CALL check_array(a,b,'magnetic branch-2 spin time reversal',failures)
+  IF (MAXVAL(ABS(a-b)) <= tol) THEN
+     WRITE(*,'(A)') 'FAIL magnetic branch confused with Kramers transform'
+     failures = failures + 1
+  ENDIF
 
   CALL hubbard_dv_from_dns_nc(ldim,nat,u_atom,dns,dv)
   DO is = 1, 4

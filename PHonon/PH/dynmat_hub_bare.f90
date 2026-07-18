@@ -761,9 +761,9 @@ SUBROUTINE dynmat_hub_bare_nc()
                  DO is = 1, 4
                     DO m1 = 1, ldim_nt
                        DO m2 = 1, ldim_nt
-                          term = term - Hubbard_U(ityp(nt)) * &
-                               CONJG(dnsbare(m1,m2,is,nt,icart,na)) * &
-                               dnsbare(m1,m2,is,nt,jcart,nap)
+                           term = term - Hubbard_U(ityp(nt)) * &
+                                CONJG(dnsbare(m1,m2,is,nt,icart,na)) * &
+                                dnsbare(m2,m1,hub_spin_transpose(is),nt,jcart,nap)
                        END DO
                     END DO
                  END DO

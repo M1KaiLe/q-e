@@ -347,19 +347,21 @@ END SUBROUTINE dnsq_bare
 SUBROUTINE dnsq_bare_nc()
   !----------------------------------------------------------------------------
   !! Bare projector contribution to the noncollinear Hubbard occupation
-  !! response. This path is restricted to norm-conserving pseudopotentials.
+  !! response.  apply_trev already transforms the auxiliary magnetic
+  !! wavefunctions, so branch 2 uses only a combined index transpose.  This
+  !! path is restricted to norm-conserving pseudopotentials.
   !
   USE kinds,         ONLY : DP
   USE io_files,      ONLY : nwordwfcU, seqopn
   USE units_lr,      ONLY : iuwfc, lrwfc, iuatwfc, iuatswfc
   USE ions_base,     ONLY : nat, ityp
-  USE klist,         ONLY : ngk, igk_k, wk, lgauss, degauss, ngauss
+  USE klist,         ONLY : xk, ngk, igk_k, wk, lgauss, degauss, ngauss
   USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, offsetU, is_hubbard, nwfcU
   USE ldaU_ph,       ONLY : wfcatomk, dnsbare, dnsbare_all_modes, read_dns_bare
-  USE ldaU_lr,       ONLY : swfcatomk
   USE wvfct,         ONLY : npwx, wg, nbnd, et
+  USE uspp,          ONLY : okvan
   USE ener,          ONLY : ef
-  USE qpoint,        ONLY : nksq, ikks
+  USE qpoint,        ONLY : nksq, ikks, ikqs
   USE qpoint_aux,    ONLY : ikmks
   USE noncollin_module, ONLY : npol, domag
   USE lsda_mod,      ONLY : nspin
@@ -371,6 +373,7 @@ SUBROUTINE dnsq_bare_nc()
   USE mp_world,      ONLY : world_comm
   USE mp_images,     ONLY : intra_image_comm
   USE io_global,     ONLY : ionode, ionode_id, stdout
+  USE control_flags, ONLY : iverbosity
   USE control_ph,    ONLY : current_iq
   USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_nc_format, &
                                   hubbard_branch_indices_nc, &
@@ -378,23 +381,27 @@ SUBROUTINE dnsq_bare_nc()
   !
   IMPLICIT NONE
   INTEGER :: isolv, nsolv, ik, ikk, ikmk, npw, na, nah, nt, icart, ibnd
-  INTEGER :: is1, is2, js, is, m, m1, m2, ldim, ldim_nt
+  INTEGER :: is1, is2, is, m, m1, m2, ldim, ldim_nt
   INTEGER :: ihubst, ihubst1, ihubst2, iunit, ipattern, ios
   INTEGER :: mbra, mket, sbra, sket, bsign, ksign
   INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
   LOGICAL :: exst, valid_restart
   CHARACTER(LEN=80) :: header
   CHARACTER(LEN=6), EXTERNAL :: int_to_char
-  COMPLEX(DP), ALLOCATABLE :: dphi(:,:), dtmp(:)
+  COMPLEX(DP), ALLOCATABLE :: dtmp(:)
   COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:)
   COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:,:)
   REAL(DP), ALLOCATABLE :: band_weight(:)
+  REAL(DP) :: branch_norm, branch_max
   REAL(DP), EXTERNAL :: wgauss
+  COMPLEX(DP), EXTERNAL :: ZDOTC
   !
   IF (npol /= 2 .OR. nspin /= 4) CALL errore('dnsq_bare_nc', &
        'inconsistent noncollinear spin dimensions', 1)
+  IF (okvan) CALL errore('dnsq_bare_nc', &
+       'noncollinear DFPT+U bare response requires norm-conserving pseudopotentials', 1)
   ldim = 2 * Hubbard_lmax + 1
-  ALLOCATE(dphi(npwx*npol,nwfcU), dtmp(npwx))
+  ALLOCATE(dtmp(npwx))
   ALLOCATE(proj(nbnd,nwfcU), dproj(nbnd,nwfcU))
   ALLOCATE(dns_branch(ldim,ldim,4,nat,3,nat))
   ALLOCATE(band_weight(nbnd))
@@ -431,8 +438,12 @@ SUBROUTINE dnsq_bare_nc()
            npw = ngk(ikk)
             CALL get_buffer(evc, lrwfc, iuwfc, ikmk)
             CALL get_buffer(wfcatomk, nwordwfcU, iuatwfc, ikk)
-            CALL get_buffer(swfcatomk, nwordwfcU, iuatswfc, ikk)
-            band_weight = wg(:,ikk)
+             ! The auxiliary time-reversed record has zero k-point weight
+             ! (set_kplusq_nc); its physical representative is ikk.  Keep the
+             ! direct occupation weight for both Sternheimer branches.  In a
+             ! smeared metal, the branch-specific eigenvalue still supplies
+             ! the Fermi-surface factor below.
+             band_weight = wg(:,ikk)
             IF (isolv == 2 .AND. lgauss) THEN
                DO ibnd = 1, nbnd
                   band_weight(ibnd) = wk(ikk) * &
@@ -450,9 +461,8 @@ SUBROUTINE dnsq_bare_nc()
                     ihubst = offsetU(nah) + m + ldim_nt*(is1-1)
                     DO ibnd = 1, nbnd
                        proj(ibnd,ihubst) = DOT_PRODUCT( &
-                            swfcatomk(1:npw,ihubst),evc(1:npw,ibnd)) + &
-                            DOT_PRODUCT(swfcatomk(npwx+1:npwx+npw,ihubst), &
-                                        evc(npwx+1:npwx+npw,ibnd))
+                            wfcatomk(1+(is1-1)*npwx:npw+(is1-1)*npwx,ihubst), &
+                            evc(1+(is1-1)*npwx:npw+(is1-1)*npwx,ibnd))
                     END DO
                  END DO
               END DO
@@ -461,37 +471,19 @@ SUBROUTINE dnsq_bare_nc()
            !
            DO na = 1, nat
               DO icart = 1, 3
-                 dphi = (0.0_DP, 0.0_DP)
-                 nt = ityp(na)
-                 IF (is_hubbard(nt)) THEN
-                    ldim_nt = 2 * Hubbard_l(nt) + 1
-                    DO is1 = 1, 2
-                       DO m = 1, ldim_nt
-                          ihubst = offsetU(na) + m + ldim_nt*(is1-1)
-                          DO js = 1, 2
-                              CALL dwfc(npw,igk_k(1,ikk),ikk,icart, &
-                                  wfcatomk(1+(js-1)*npwx,ihubst),dtmp)
-                             dphi(1+(js-1)*npwx:npw+(js-1)*npwx,ihubst) = &
-                                  dtmp(1:npw)
-                          END DO
-                       END DO
-                    END DO
-                 ENDIF
-                 !
                  dproj = (0.0_DP, 0.0_DP)
                  DO nah = 1, nat
                     nt = ityp(nah)
-                    IF (.NOT. is_hubbard(nt)) CYCLE
+                    IF (.NOT. is_hubbard(nt) .OR. nah /= na) CYCLE
                     ldim_nt = 2 * Hubbard_l(nt) + 1
                     DO is1 = 1, 2
                        DO m = 1, ldim_nt
                           ihubst = offsetU(nah) + m + ldim_nt*(is1-1)
+                          CALL dwfc(npw, igk_k(1,ikk), ikk, icart, &
+                               wfcatomk(1+(is1-1)*npwx,ihubst), dtmp)
                           DO ibnd = 1, nbnd
-                             dproj(ibnd,ihubst) = DOT_PRODUCT( &
-                                  dphi(1:npw,ihubst),evc(1:npw,ibnd)) + &
-                                  DOT_PRODUCT( &
-                                  dphi(npwx+1:npwx+npw,ihubst), &
-                                  evc(npwx+1:npwx+npw,ibnd))
+                             dproj(ibnd,ihubst) = ZDOTC(npw, dtmp, 1, &
+                                  evc(1+(is1-1)*npwx,ibnd), 1)
                           END DO
                        END DO
                     END DO
@@ -538,10 +530,17 @@ SUBROUTINE dnsq_bare_nc()
                        END DO
                     END DO
                  END DO
+                 END DO
               END DO
            END DO
-         END DO
-         CALL mp_sum(dns_branch, inter_pool_comm)
+          CALL mp_sum(dns_branch, inter_pool_comm)
+         IF (iverbosity > 0) THEN
+            branch_norm = SQRT(SUM(ABS(dns_branch)**2))
+            branch_max = MAXVAL(ABS(dns_branch))
+            WRITE(stdout,'(5x,a,i1,a,es14.6,a,es14.6)') &
+                 'DFPT+U NC bare branch ', isolv, ': frob=', branch_norm, &
+                 ' max=', branch_max
+         ENDIF
          dnsbare = dnsbare + dns_branch
       END DO
       IF (ionode) THEN
@@ -563,6 +562,6 @@ SUBROUTINE dnsq_bare_nc()
      WRITE(ipattern,*) dnsbare_all_modes
      CLOSE(ipattern,STATUS='keep')
   ENDIF
-  DEALLOCATE(dphi, dtmp, proj, dproj, dns_branch, band_weight)
+  DEALLOCATE(dtmp, proj, dproj, dns_branch, band_weight)
 END SUBROUTINE dnsq_bare_nc
 !----------------------------------------------------------------------------

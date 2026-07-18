@@ -314,7 +314,9 @@ END SUBROUTINE dnsq_scf
 SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   !----------------------------------------------------------------------------
   !! Noncollinear response of the Hubbard occupation matrix.  A finite-q
-  !! magnetic phonon combines direct and -B Sternheimer solutions.  The
+  !! magnetic phonon combines direct and -B Sternheimer solutions.  Since
+  !! apply_trev already transforms the auxiliary wavefunctions, their
+  !! occupation overlap enters with a combined orbital-spin transpose.  The
   !! q=0 electric-field response is completed by its Hermitian adjoint.
   !! A time-reversal-symmetric calculation obtains the complementary half
   !! from the Kramers partner of the direct solution.
@@ -355,7 +357,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   INTEGER :: m, m1, m2, is1, is2, is, ihubst, ihubst1, ihubst2
   INTEGER :: mbra, mket, sbra, sket, bsign, ksign
   INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
-  REAL(DP) :: wdelta, w1
+  REAL(DP) :: wdelta, w1, branch_norm, branch_max, total_norm, total_max
   COMPLEX(DP), ALLOCATABLE :: dpsi(:,:), proj1(:,:), proj2(:,:)
   COMPLEX(DP), ALLOCATABLE :: dns_branch(:,:,:,:,:)
   COMPLEX(DP), ALLOCATABLE :: dns_adjoint(:,:,:,:)
@@ -427,51 +429,54 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
               DO is1 = 1, 2
                  DO is2 = 1, 2
                     is = hub_spin_index(is1,is2)
-                    DO m1 = 1, ldim_nt
-                           DO m2 = 1, ldim_nt
+                     DO m1 = 1, ldim_nt
+                        DO m2 = 1, ldim_nt
                               CALL hubbard_branch_indices_nc(isolv,m1,m2,is1,is2, &
                                    mbra,mket,sbra,sket,bsign)
                               ihubst1 = offsetU(nah) + mbra + ldim_nt*(sbra-1)
                               ihubst2 = offsetU(nah) + mket + ldim_nt*(sket-1)
-                              DO ibnd = 1, nbnd_branch
-                                  dns_branch(m1,m2,is,nah,ipert) = &
-                                       dns_branch(m1,m2,is,nah,ipert) + &
-                                       REAL(bsign,DP) * wk(ikk) * &
-                                       CONJG(proj1(ibnd,ihubst1)) * &
-                                       proj2(ibnd,ihubst2)
-                                   ! The single nonmagnetic solve supplies its
-                                   ! fixed-q bra half through J R^T J^dagger.
-                                   IF (.NOT. domag) THEN
-                                      CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
-                                           mbra_k,mket_k,sbra_k,sket_k,ksign)
-                                      ihubst1_k = offsetU(nah) + mbra_k + &
-                                           ldim_nt*(sbra_k-1)
-                                      ihubst2_k = offsetU(nah) + mket_k + &
-                                           ldim_nt*(sket_k-1)
-                                      dns_branch(m1,m2,is,nah,ipert) = &
-                                           dns_branch(m1,m2,is,nah,ipert) + &
-                                           REAL(ksign,DP) * wk(ikk) * &
-                                           CONJG(proj1(ibnd,ihubst1_k)) * &
-                                           proj2(ibnd,ihubst2_k)
-                                   ENDIF
-                                 IF (lmetq0 .AND. isolv == 1) THEN
-                                    wdelta = w0gauss((ef-et(ibnd,ikk))/degauss,ngauss) / degauss
-                                    w1 = wk(ikk) * wdelta
-                                    IF (.NOT. domag) w1 = 0.5_DP * w1
-                                    dns_branch(m1,m2,is,nah,ipert) = &
-                                         dns_branch(m1,m2,is,nah,ipert) + &
-                                         w1 * def(ipert) * CONJG(proj1(ibnd, &
-                                         offsetU(nah)+m1+ldim_nt*(is1-1))) * &
-                                         proj1(ibnd,offsetU(nah)+m2+ldim_nt*(is2-1))
-                                    IF (.NOT. domag) THEN
-                                       dns_branch(m1,m2,is,nah,ipert) = &
-                                            dns_branch(m1,m2,is,nah,ipert) + &
-                                            REAL(ksign,DP) * w1 * def(ipert) * &
-                                            CONJG(proj1(ibnd,ihubst1_k)) * &
-                                            proj1(ibnd,ihubst2_k)
-                                    ENDIF
-                             ENDIF
-                          END DO
+                           DO ibnd = 1, nbnd_branch
+                              dns_branch(m1,m2,is,nah,ipert) = &
+                                   dns_branch(m1,m2,is,nah,ipert) + &
+                                   REAL(bsign,DP) * wk(ikk) * &
+                                   CONJG(proj1(ibnd,ihubst1)) * &
+                                   proj2(ibnd,ihubst2)
+                           ! The single nonmagnetic solve supplies its fixed-q
+                           ! bra half through J R^T J^dagger.
+                           IF (.NOT. domag) THEN
+                              CALL hubbard_kramers_indices_nc(m1,m2,is1,is2, &
+                                   mbra_k,mket_k,sbra_k,sket_k,ksign)
+                              ihubst1_k = offsetU(nah) + mbra_k + &
+                                   ldim_nt*(sbra_k-1)
+                              ihubst2_k = offsetU(nah) + mket_k + &
+                                   ldim_nt*(sket_k-1)
+                              dns_branch(m1,m2,is,nah,ipert) = &
+                                   dns_branch(m1,m2,is,nah,ipert) + &
+                                   REAL(ksign,DP) * wk(ikk) * &
+                                   CONJG(proj1(ibnd,ihubst1_k)) * &
+                                   proj2(ibnd,ihubst2_k)
+                           ENDIF
+                           IF (lmetq0) THEN
+                              wdelta = w0gauss((ef-et(ibnd,ikmk))/degauss,ngauss) / degauss
+                              ! The direct and -B branches provide the two
+                              ! one-sided pieces of the response.  The
+                              ! Fermi-occupation term itself is single, so
+                              ! split it equally between both branches.
+                              w1 = 0.5_DP * wk(ikk) * wdelta
+                              dns_branch(m1,m2,is,nah,ipert) = &
+                                   dns_branch(m1,m2,is,nah,ipert) + &
+                                   REAL(bsign,DP) * w1 * def(ipert) * &
+                                   CONJG(proj1(ibnd,ihubst1)) * &
+                                   proj1(ibnd,ihubst2)
+                              IF (.NOT. domag) THEN
+                                 dns_branch(m1,m2,is,nah,ipert) = &
+                                      dns_branch(m1,m2,is,nah,ipert) + &
+                                      REAL(ksign,DP) * w1 * def(ipert) * &
+                                      CONJG(proj1(ibnd,ihubst1_k)) * &
+                                      proj1(ibnd,ihubst2_k)
+                              ENDIF
+                           ENDIF
+                        END DO
                        END DO
                     END DO
                  END DO
@@ -488,8 +493,21 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
                  dns_branch(:,:,:,:,ipert) + dns_adjoint
          END DO
       ENDIF
+      IF (iverbosity > 0) THEN
+         branch_norm = SQRT(SUM(ABS(dns_branch)**2))
+         branch_max = MAXVAL(ABS(dns_branch))
+         WRITE(stdout,'(5x,a,i1,a,es14.6,a,es14.6)') &
+              'DFPT+U NC dns branch ', isolv, ': frob=', branch_norm, &
+              ' max=', branch_max
+      ENDIF
       dnsscf = dnsscf + dns_branch
    END DO
+   IF (iverbosity > 0) THEN
+      total_norm = SQRT(SUM(ABS(dnsscf)**2))
+      total_max = MAXVAL(ABS(dnsscf))
+      WRITE(stdout,'(5x,a,es14.6,a,es14.6)') &
+           'DFPT+U NC dnsscf total: frob=', total_norm, ' max=', total_max
+   ENDIF
    !
   IF (lflag) THEN
      CALL sym_dns_nc(ldim, npe, irr, dnsscf)
