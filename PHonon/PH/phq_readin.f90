@@ -47,7 +47,7 @@ SUBROUTINE phq_readin()
   USE disp,          ONLY : nq1, nq2, nq3, x_q, wq, nqs, lgamma_iq
   USE io_files,      ONLY : tmp_dir, prefix, postfix, create_directory, &
                             check_tempdir, xmlpun_schema
-  USE noncollin_module, ONLY : domag, i_cons, noncolin, lspinorb
+  USE noncollin_module, ONLY : domag, i_cons, noncolin, lspinorb, npol
   USE symm_base,     ONLY : nsym, t_rev, no_t_rev
   USE control_flags, ONLY : iverbosity, modenum
   USE io_global,     ONLY : meta_ionode, meta_ionode_id, ionode, ionode_id, &
@@ -71,7 +71,7 @@ SUBROUTINE phq_readin()
   ! YAMBO <
   USE elph_tetra_mod,ONLY : elph_tetra, lshift_q, in_alpha2f
   USE ktetra,        ONLY : tetra_type
-  USE ldaU,          ONLY : lda_plus_u, Hubbard_projectors, lda_plus_u_kind, &
+  USE ldaU,          ONLY : lda_plus_u, Hubbard_projectors, Hubbard_lmax, lda_plus_u_kind, &
                              is_hubbard_back, Hubbard_J0, Hubbard_alpha, &
                              Hubbard_beta
   USE uspp_param,    ONLY : upf
@@ -797,7 +797,16 @@ SUBROUTINE phq_readin()
              WRITE(stdout,'(5x,a)') "Experimental noncollinear magnetic DFPT+U (NC, U-only)"
           ELSE
              WRITE(stdout,'(5x,a)') "Experimental nonmagnetic SOC DFPT+U (NC, U-only)"
-      ENDIF
+          ENDIF
+          WRITE(stdout,'(5x,"DFPTU_NC_CAPS noncolin=",l1," lspinorb=",l1, &
+               &" domag=",l1," no_t_rev=",l1," nspin=",i2," npol=",i2, &
+               &" okvan=",l1," okpaw=",l1," projector=",a, &
+               &" Hubbard_lmax=",i2," J0_max=",es12.4)') noncolin, lspinorb, &
+               domag, no_t_rev, nspin, npol, okvan, okpaw, TRIM(Hubbard_projectors), &
+               Hubbard_lmax, MAXVAL(ABS(Hubbard_J0))
+          WRITE(stdout,'(5x,"DFPTU_NC_Q iq=",i4," q=",3f14.8," nsym=",i3, &
+               &" antiunitary_count=",i3)') current_iq, xq, nsym, &
+               COUNT(t_rev(1:nsym) /= 0)
       ENDIF
      !
   ENDIF

@@ -213,8 +213,7 @@ SUBROUTINE sym_dns_nc(ldim, npe, irr, dns)
   USE modes,        ONLY : t, tmq
   USE qpoint,       ONLY : xq
   USE symm_base,    ONLY : d1, d2, d3, irt, t_rev
-  USE hubbard_nc_response, ONLY : hubbard_rotate_nc, hubbard_adjoint_nc, &
-                                  hubbard_spin_inverse_nc
+  USE hubbard_nc_response, ONLY : hubbard_rotate_nc, hubbard_adjoint_nc
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: ldim, npe, irr
@@ -222,7 +221,7 @@ SUBROUTINE sym_dns_nc(ldim, npe, irr, dns)
   !
   INTEGER :: isym, irot, ip, jp, na, nb, nt, ldim_nt
   REAL(DP) :: arg, dorb(ldim,ldim)
-  COMPLEX(DP) :: phase, dspin_inv(2,2)
+  COMPLEX(DP) :: phase, dspin(2,2)
   COMPLEX(DP), ALLOCATABLE :: dnr(:,:,:,:,:), dnraux(:,:,:,:,:)
   COMPLEX(DP), ALLOCATABLE :: rotated(:,:,:,:,:), adjoint(:,:,:,:)
   !
@@ -271,15 +270,18 @@ CONTAINS
           CASE(0)
              dorb(1,1) = 1.0_DP
           CASE(1)
-             dorb(1:ldim_nt,1:ldim_nt) = TRANSPOSE(d1(1:ldim_nt,1:ldim_nt,op))
+             dorb(1:ldim_nt,1:ldim_nt) = d1(1:ldim_nt,1:ldim_nt,op)
           CASE(2)
-             dorb(1:ldim_nt,1:ldim_nt) = TRANSPOSE(d2(1:ldim_nt,1:ldim_nt,op))
+             dorb(1:ldim_nt,1:ldim_nt) = d2(1:ldim_nt,1:ldim_nt,op)
           CASE(3)
-             dorb(1:ldim_nt,1:ldim_nt) = TRANSPOSE(d3(1:ldim_nt,1:ldim_nt,op))
+             dorb(1:ldim_nt,1:ldim_nt) = d3(1:ldim_nt,1:ldim_nt,op)
           CASE DEFAULT
              CALL errore('sym_dns_nc','angular momentum not implemented',ABS(Hubbard_l(nt)))
           END SELECT
-          CALL hubbard_spin_inverse_nc(d_spin_ldau(:,:,op), dspin_inv)
+          ! hubbard_rotate_nc applies N'=(D_l*S)^dagger N (D_l*S).
+          ! Use the same direct representation convention as PW/new_ns_nc
+          ! and HP/hp_symdnsq; do not pre-invert either factor here.
+          dspin = d_spin_ldau(:,:,op)
           arg = tpi * DOT_PRODUCT(xq, rtau(:,op,na))
           phase = CMPLX(COS(arg),SIN(arg),kind=DP)
           DO jp = 1, npe
@@ -287,7 +289,7 @@ CONTAINS
              block_in(1:ldim_nt,1:ldim_nt,:) = &
                   input(1:ldim_nt,1:ldim_nt,:,nb,jp)
              CALL hubbard_rotate_nc(ldim_nt, dorb(1:ldim_nt,1:ldim_nt), &
-                  dspin_inv, block_in(1:ldim_nt,1:ldim_nt,:), &
+                  dspin, block_in(1:ldim_nt,1:ldim_nt,:), &
                   block_out(1:ldim_nt,1:ldim_nt,:))
              IF (map_minus_q) THEN
                 output(1:ldim_nt,1:ldim_nt,:,na,ip) = &

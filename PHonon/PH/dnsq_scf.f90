@@ -333,6 +333,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   USE qpoint,        ONLY : nksq, ikks, ikqs
   USE qpoint_aux,    ONLY : ikmks
   USE control_lr,    ONLY : lgamma, nbnd_occ
+  USE control_ph,    ONLY : current_iq
   USE noncollin_module, ONLY : npol, domag
   USE lsda_mod,      ONLY : nspin
   USE wavefunctions, ONLY : evc
@@ -346,7 +347,8 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   USE io_global,     ONLY : stdout
   USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_branch_indices_nc, &
                                   hubbard_kramers_indices_nc, &
-                                  hubbard_adjoint_nc
+                                  hubbard_adjoint_nc, hubbard_nc_diag_response5, &
+                                  hubbard_nc_diag_qmap
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: npe, imode0, irr
@@ -372,6 +374,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   ALLOCATE(dns_adjoint(ldim,ldim,4,nat))
   dnsscf = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag .AND. lflag)
+  CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
   !
   DO isolv = 1, nsolv
      dns_branch = (0.0_DP, 0.0_DP)
@@ -500,6 +503,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
               'DFPT+U NC dns branch ', isolv, ': frob=', branch_norm, &
               ' max=', branch_max
       ENDIF
+      CALL hubbard_nc_diag_response5('dns_branch', current_iq, isolv, dns_branch)
       dnsscf = dnsscf + dns_branch
    END DO
    IF (iverbosity > 0) THEN
@@ -508,6 +512,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
       WRITE(stdout,'(5x,a,es14.6,a,es14.6)') &
            'DFPT+U NC dnsscf total: frob=', total_norm, ' max=', total_max
    ENDIF
+   CALL hubbard_nc_diag_response5('dnsscf_total', current_iq, 0, dnsscf)
    !
   IF (lflag) THEN
      CALL sym_dns_nc(ldim, npe, irr, dnsscf)

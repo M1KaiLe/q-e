@@ -179,6 +179,8 @@ SUBROUTINE write_dynmat_hub
   USE kinds,         ONLY : DP
   USE io_global,     ONLY : stdout, ionode
   USE dynmat,        ONLY : dyn_hub_scf, dyn_hub_bare
+  USE control_ph,    ONLY : current_iq
+  USE hubbard_nc_response, ONLY : hubbard_nc_diag_dyn
   USE ldaU_ph,       ONLY : dnsscf_all_modes      
   USE ldaU,          ONLY : lda_plus_u, Hubbard_lmax, Hubbard_l, is_hubbard
   USE control_flags, ONLY : iverbosity 
@@ -210,6 +212,7 @@ SUBROUTINE write_dynmat_hub
   ELSE
      WRITE(stdout,'("Warning! dyn_hub_bare is not allocated.")')
   ENDIF
+  CALL hubbard_nc_diag_dyn('total', current_iq, dyn_hub_tot)
   !
   ! Write the UNSYMMETRIZED total Hubbard dynamical matrix 
   ! in the pattern basis

@@ -464,7 +464,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   USE wvfct,         ONLY : npwx, nbnd
   USE noncollin_module, ONLY : npol, domag
   USE lsda_mod,      ONLY : nspin
-  USE control_ph,    ONLY : rec_code_read
+  USE control_ph,    ONLY : rec_code_read, current_iq
   USE control_lr,    ONLY : lgamma, nbnd_occ
   USE units_lr,      ONLY : iuwfc, lrwfc, iudwf, lrdwf
   USE wavefunctions, ONLY : evc
@@ -473,13 +473,14 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   USE mp,            ONLY : mp_sum
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE mp_pools,      ONLY : inter_pool_comm
-  USE hubbard_nc_response, ONLY : hub_spin_transpose
+  USE io_global,     ONLY : ionode, stdout
+  USE hubbard_nc_response, ONLY : hub_spin_transpose, hubbard_nc_diag_dyn
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: irr, nu_i0, nper
   INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npwq, nbnd_branch
   INTEGER :: ipert, imode, jmode, nrec, ibnd, nt, nah, m1, m2, is
-  REAL(DP) :: lmetq0
+  REAL(DP) :: lmetq0, dvhub_norm2
   COMPLEX(DP), ALLOCATABLE :: dyn1(:,:), dvhub(:,:)
   COMPLEX(DP) :: prj, cross
   !
@@ -487,6 +488,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
        'inconsistent noncollinear spin dimensions', 1)
   ALLOCATE(dyn1(nper,nmodes), dvhub(npwx*npol,nbnd))
   dyn1 = (0.0_DP, 0.0_DP)
+  dvhub_norm2 = 0.0_DP
   nsolv = MERGE(2, 1, domag)
   lmetq0 = MERGE(1.0_DP,0.0_DP,(lgauss .OR. ltetra) .AND. lgamma)
   IF (rec_code_read == 10) CALL dnsq_scf(nper,lmetq0 > 0.5_DP,nu_i0,irr,.TRUE.)
@@ -505,6 +507,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
         CALL get_buffer(evc,lrwfc,iuwfc,ikmk)
         DO imode = 1, nmodes
            CALL dvqhub_barepsi_nc(ik,u(1,imode),isolv==2,.FALSE.,dvhub)
+           dvhub_norm2 = dvhub_norm2 + SUM(ABS(dvhub)**2)
            DO ipert = 1, nper
               nrec = (isolv-1)*nper*nksq + (ipert-1)*nksq + ik
               CALL get_buffer(dpsi,lrdwf,iudwf,nrec)
@@ -555,6 +558,10 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
         dyn(jmode,imode) = dyn(jmode,imode) + dyn1(ipert,imode)
      END DO
   END DO
+  CALL mp_sum(dvhub_norm2, inter_pool_comm)
+  IF (ionode) WRITE(stdout,'(5x,"DFPTU_NC_DV iq=",i4," norm=",es16.8)') &
+       current_iq, SQRT(dvhub_norm2)
+  CALL hubbard_nc_diag_dyn('scf', current_iq, dyn_hub_scf)
   DEALLOCATE(dyn1,dvhub)
 END SUBROUTINE dynmat_hub_scf_nc
 !----------------------------------------------------------------------------

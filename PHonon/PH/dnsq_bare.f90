@@ -377,7 +377,8 @@ SUBROUTINE dnsq_bare_nc()
   USE control_ph,    ONLY : current_iq
   USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_nc_format, &
                                   hubbard_branch_indices_nc, &
-                                  hubbard_kramers_indices_nc
+                                  hubbard_kramers_indices_nc, &
+                                  hubbard_nc_diag_qmap, hubbard_nc_diag_response6
   !
   IMPLICIT NONE
   INTEGER :: isolv, nsolv, ik, ikk, ikmk, npw, na, nah, nt, icart, ibnd
@@ -387,6 +388,7 @@ SUBROUTINE dnsq_bare_nc()
   INTEGER :: mbra_k, mket_k, sbra_k, sket_k, ihubst1_k, ihubst2_k
   LOGICAL :: exst, valid_restart
   CHARACTER(LEN=80) :: header
+  CHARACTER(LEN=256) :: metadata, expected_metadata
   CHARACTER(LEN=6), EXTERNAL :: int_to_char
   COMPLEX(DP), ALLOCATABLE :: dtmp(:)
   COMPLEX(DP), ALLOCATABLE :: proj(:,:), dproj(:,:)
@@ -407,6 +409,7 @@ SUBROUTINE dnsq_bare_nc()
   ALLOCATE(band_weight(nbnd))
   dnsbare = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag)
+  CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
   !
   iunit = 37
   exst = .FALSE.
@@ -415,8 +418,13 @@ SUBROUTINE dnsq_bare_nc()
   IF (read_dns_bare .AND. ionode .AND. exst) THEN
      READ(iunit,'(A)',IOSTAT=ios) header
      IF (ios == 0 .AND. TRIM(header) == hubbard_nc_format) THEN
-        READ(iunit,*,IOSTAT=ios) dnsbare
-        valid_restart = (ios == 0)
+        WRITE(expected_metadata,'("ldim=",I0,1X,"nspin=4 nat=",I0,1X, &
+             &"nmodes=",I0,1X,"spin_order=uu,ud,du,dd")') ldim, nat, 3*nat
+        READ(iunit,'(A)',IOSTAT=ios) metadata
+        IF (ios == 0 .AND. TRIM(metadata) == TRIM(expected_metadata)) THEN
+           READ(iunit,*,IOSTAT=ios) dnsbare
+           valid_restart = (ios == 0)
+        ENDIF
      ENDIF
   ENDIF
   CALL mp_bcast(valid_restart, ionode_id, world_comm)
@@ -534,6 +542,7 @@ SUBROUTINE dnsq_bare_nc()
               END DO
            END DO
           CALL mp_sum(dns_branch, inter_pool_comm)
+         CALL hubbard_nc_diag_response6('bare_branch', current_iq, isolv, dns_branch)
          IF (iverbosity > 0) THEN
             branch_norm = SQRT(SUM(ABS(dns_branch)**2))
             branch_max = MAXVAL(ABS(dns_branch))
@@ -546,9 +555,12 @@ SUBROUTINE dnsq_bare_nc()
       IF (ionode) THEN
         REWIND(iunit)
         WRITE(iunit,'(A)') hubbard_nc_format
+        WRITE(iunit,'("ldim=",I0,1X,"nspin=4 nat=",I0,1X,"nmodes=",I0,1X,&
+             &"spin_order=uu,ud,du,dd")') ldim, nat, 3*nat
         WRITE(iunit,*) dnsbare
      ENDIF
   ENDIF
+  CALL hubbard_nc_diag_response6('bare_total', current_iq, 0, dnsbare)
   IF (ionode) CLOSE(iunit,STATUS='keep')
   !
   CALL sym_dns_wrapper(ldim, dnsbare, dnsbare_all_modes)

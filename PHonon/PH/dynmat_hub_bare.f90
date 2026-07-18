@@ -632,10 +632,12 @@ SUBROUTINE dynmat_hub_bare_nc()
   USE scf,           ONLY : v
   USE modes,         ONLY : u, nmodes
   USE dynmat,        ONLY : dyn, dyn_hub_bare
+  USE control_ph,    ONLY : current_iq
   USE mp,            ONLY : mp_sum
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE mp_pools,      ONLY : inter_pool_comm
-  USE hubbard_nc_response, ONLY : hub_spin_index, hub_spin_transpose
+  USE hubbard_nc_response, ONLY : hub_spin_index, hub_spin_transpose, &
+                                  hubbard_nc_diag_dyn
   !
   IMPLICIT NONE
   INTEGER :: ik, ikk, npw, na, nap, nt, ldim, ldim_nt
@@ -787,6 +789,7 @@ SUBROUTINE dynmat_hub_bare_nc()
         dyn_hub_bare(imode,jmode) = dyn_hub_bare(imode,jmode) + work
      END DO
   END DO
+  CALL hubbard_nc_diag_dyn('bare', current_iq, dyn_hub_bare)
   DEALLOCATE(dynwrk,d2n,proj,dproj,d2proj,dtmp,d2tmp)
 END SUBROUTINE dynmat_hub_bare_nc
 !----------------------------------------------------------------------------

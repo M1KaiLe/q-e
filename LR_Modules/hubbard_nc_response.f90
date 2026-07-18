@@ -30,6 +30,9 @@ MODULE hubbard_nc_response
   PUBLIC :: hubbard_adjoint_nc
   PUBLIC :: hubbard_spin_inverse_nc
   PUBLIC :: hubbard_rotate_nc
+  PUBLIC :: hubbard_nc_diag_matrix, hubbard_nc_diag_dyn
+  PUBLIC :: hubbard_nc_diag_response5, hubbard_nc_diag_response6
+  PUBLIC :: hubbard_nc_diag_qmap
   !
 CONTAINS
   !
@@ -245,5 +248,122 @@ CONTAINS
        END DO
     END DO
   END SUBROUTINE hubbard_rotate_nc
+  !
+  SUBROUTINE hubbard_nc_diag_matrix(tag, iq, branch, matrix)
+    !! Print compact, ionode-only diagnostics for a 4-block Hubbard matrix.
+    !! The output is intentionally a single machine-readable line per call;
+    !! full matrices remain in the versioned response files.
+    USE io_global, ONLY : ionode, stdout
+    CHARACTER(*), INTENT(IN) :: tag
+    INTEGER, INTENT(IN) :: iq, branch
+    COMPLEX(DP), INTENT(IN) :: matrix(:,:,:,:)
+    REAL(DP) :: norm_total, norm_max, norm_block(4)
+    REAL(DP) :: norm_charge, norm_mz, norm_mx, norm_my
+    INTEGER :: is
+    !
+    IF (.NOT. ionode) RETURN
+    DO is = 1, 4
+       norm_block(is) = SQRT(SUM(ABS(matrix(:,:,is,:))**2))
+    END DO
+    norm_total = SQRT(SUM(ABS(matrix)**2))
+    norm_max = MAXVAL(ABS(matrix))
+    norm_charge = SQRT(SUM(ABS(matrix(:,:,hub_spin_uu,:) + &
+                               matrix(:,:,hub_spin_dd,:))**2))
+    norm_mz = SQRT(SUM(ABS(matrix(:,:,hub_spin_uu,:) - &
+                           matrix(:,:,hub_spin_dd,:))**2))
+    norm_mx = SQRT(SUM(ABS(matrix(:,:,hub_spin_ud,:) + &
+                           matrix(:,:,hub_spin_du,:))**2))
+    norm_my = SQRT(SUM(ABS(matrix(:,:,hub_spin_du,:) - &
+                           matrix(:,:,hub_spin_ud,:))**2))
+    WRITE(stdout,'(5x,"DFPTU_NC_MATRIX tag=",a," iq=",i4," branch=",i2, &
+         &" norm=",es16.8," max=",es16.8)') TRIM(tag), iq, branch, &
+         norm_total, norm_max
+    WRITE(stdout,'(5x,"DFPTU_NC_BLOCKS iq=",i4," branch=",i2, &
+         &" uu=",es16.8," ud=",es16.8," du=",es16.8," dd=",es16.8, &
+         &" charge=",es16.8," mz=",es16.8," mx=",es16.8," my=",es16.8)') &
+         iq, branch, norm_block(1), norm_block(2), norm_block(3), norm_block(4), &
+         norm_charge, norm_mz, norm_mx, norm_my
+  END SUBROUTINE hubbard_nc_diag_matrix
+  !
+  SUBROUTINE hubbard_nc_diag_response5(tag, iq, branch, matrix)
+    !! Diagnostic for dns_branch(ldim,ldim,4,nat,npert).
+    USE io_global, ONLY : ionode, stdout
+    CHARACTER(*), INTENT(IN) :: tag
+    INTEGER, INTENT(IN) :: iq, branch
+    COMPLEX(DP), INTENT(IN) :: matrix(:,:,:,:,:)
+    REAL(DP) :: norm_total, norm_max, norm_block(4)
+    INTEGER :: is
+    !
+    IF (.NOT. ionode) RETURN
+    DO is = 1, 4
+       norm_block(is) = SQRT(SUM(ABS(matrix(:,:,is,:,:))**2))
+    END DO
+    norm_total = SQRT(SUM(ABS(matrix)**2))
+    norm_max = MAXVAL(ABS(matrix))
+    WRITE(stdout,'(5x,"DFPTU_NC_RESPONSE tag=",a," iq=",i4," branch=",i2, &
+         &" norm=",es16.8," max=",es16.8," uu=",es16.8," ud=",es16.8, &
+         &" du=",es16.8," dd=",es16.8)') TRIM(tag), iq, branch, norm_total, &
+         norm_max, norm_block(1), norm_block(2), norm_block(3), norm_block(4)
+  END SUBROUTINE hubbard_nc_diag_response5
+  !
+  SUBROUTINE hubbard_nc_diag_response6(tag, iq, branch, matrix)
+    !! Diagnostic for dns_branch(ldim,ldim,4,nat,3,nat).
+    USE io_global, ONLY : ionode, stdout
+    CHARACTER(*), INTENT(IN) :: tag
+    INTEGER, INTENT(IN) :: iq, branch
+    COMPLEX(DP), INTENT(IN) :: matrix(:,:,:,:,:,:)
+    REAL(DP) :: norm_total, norm_max, norm_block(4)
+    INTEGER :: is
+    !
+    IF (.NOT. ionode) RETURN
+    DO is = 1, 4
+       norm_block(is) = SQRT(SUM(ABS(matrix(:,:,is,:,:,:))**2))
+    END DO
+    norm_total = SQRT(SUM(ABS(matrix)**2))
+    norm_max = MAXVAL(ABS(matrix))
+    WRITE(stdout,'(5x,"DFPTU_NC_RESPONSE tag=",a," iq=",i4," branch=",i2, &
+         &" norm=",es16.8," max=",es16.8," uu=",es16.8," ud=",es16.8, &
+         &" du=",es16.8," dd=",es16.8)') TRIM(tag), iq, branch, norm_total, &
+         norm_max, norm_block(1), norm_block(2), norm_block(3), norm_block(4)
+  END SUBROUTINE hubbard_nc_diag_response6
+  !
+  SUBROUTINE hubbard_nc_diag_dyn(tag, iq, matrix)
+    !! Print norm and Hermitian defect of a phonon dynamical matrix.
+    USE io_global, ONLY : ionode, stdout
+    CHARACTER(*), INTENT(IN) :: tag
+    INTEGER, INTENT(IN) :: iq
+    COMPLEX(DP), INTENT(IN) :: matrix(:,:)
+    REAL(DP) :: norm_total, norm_max, norm_herm, rel_herm
+    !
+    IF (.NOT. ionode) RETURN
+    norm_total = SQRT(SUM(ABS(matrix)**2))
+    norm_max = MAXVAL(ABS(matrix))
+    norm_herm = SQRT(SUM(ABS(matrix - CONJG(TRANSPOSE(matrix)))**2))
+    rel_herm = norm_herm / MAX(1.0_DP, norm_total)
+    WRITE(stdout,'(5x,"DFPTU_NC_DYN tag=",a," iq=",i4," norm=",es16.8, &
+         &" max=",es16.8," herm_defect=",es16.8," rel_herm=",es16.8)') &
+         TRIM(tag), iq, norm_total, norm_max, norm_herm, rel_herm
+  END SUBROUTINE hubbard_nc_diag_dyn
+  !
+  SUBROUTINE hubbard_nc_diag_qmap(iq, ikks_in, ikqs_in, ikmks_in)
+    !! Print a deterministic checksum of the direct, k+q and time-reversed
+    !! record maps used by the two Sternheimer branches.
+    USE io_global, ONLY : ionode, stdout
+    INTEGER, INTENT(IN) :: iq
+    INTEGER, INTENT(IN) :: ikks_in(:), ikqs_in(:), ikmks_in(:)
+    INTEGER :: ik, bad, hash
+    !
+    IF (.NOT. ionode) RETURN
+    bad = 0
+    hash = 0
+    DO ik = 1, SIZE(ikks_in)
+       IF (ikks_in(ik) < 1 .OR. ikqs_in(ik) < 1 .OR. ikmks_in(ik) < 1) bad = bad + 1
+       hash = MOD(hash + 17*ikks_in(ik) + 31*ikqs_in(ik) + 47*ikmks_in(ik), 2147483629)
+    END DO
+    WRITE(stdout,'(5x,"DFPTU_NC_QMAP iq=",i4," nksq=",i6," bad=",i4, &
+         &" hash=",i12," first=",3i6," last=",3i6)') iq, SIZE(ikks_in), bad, hash, &
+         ikks_in(1), ikqs_in(1), ikmks_in(1), &
+         ikks_in(SIZE(ikks_in)), ikqs_in(SIZE(ikqs_in)), ikmks_in(SIZE(ikmks_in))
+  END SUBROUTINE hubbard_nc_diag_qmap
   !
 END MODULE hubbard_nc_response
