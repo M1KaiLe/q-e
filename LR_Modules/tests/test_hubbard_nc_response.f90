@@ -5,14 +5,15 @@ PROGRAM test_hubbard_nc_response
 
   INTEGER, PARAMETER :: ldim = 2, nat = 1
   REAL(DP), PARAMETER :: tol = 1.0E-12_DP
-  INTEGER :: failures, is, is1, is2, m1, m2
+  INTEGER :: failures, is, is1, is2, is3, is4, js, m1, m2, m3, m4
   INTEGER :: mbra, mket, sbra, sket, bsign, ksign
   REAL(DP) :: u_atom(nat), d1(ldim,ldim), d2(ldim,ldim), deff(ldim,ldim)
   COMPLEX(DP) :: dns(ldim,ldim,4,nat), dv(ldim,ldim,4,nat)
   COMPLEX(DP) :: a(ldim,ldim,4,nat), b(ldim,ldim,4,nat)
   COMPLEX(DP) :: r1(ldim,ldim,4), r2(ldim,ldim,4), reff(ldim,ldim,4)
+  COMPLEX(DP) :: rref(ldim,ldim,4)
   COMPLEX(DP) :: s1(2,2), s2(2,2), seff(2,2), sinv(2,2)
-  REAL(DP) :: angle
+  REAL(DP) :: angle, explicit_err, wrong_convention_err
 
   failures = 0
   DO is1 = 1, 2
@@ -198,6 +199,41 @@ PROGRAM test_hubbard_nc_response
   CALL check_complex(seff(2,1),(0.0_DP,0.0_DP),'spin inverse 21',failures)
   CALL check_complex(seff(2,2),(1.0_DP,0.0_DP),'spin inverse 22',failures)
   CALL hubbard_rotate_nc(ldim,d1,s1,r1,r2)
+  ! Explicit reference for the direct combined rotation used by new_ns_nc
+  ! and sym_dns_nc.  This intentionally uses nonsymmetric D and complex S,
+  ! so a transpose/inverse convention cannot pass accidentally.
+  rref = (0.0_DP,0.0_DP)
+  DO is1 = 1, 2
+     DO is2 = 1, 2
+        is = hub_spin_index(is1,is2)
+        DO is3 = 1, 2
+           DO is4 = 1, 2
+              js = hub_spin_index(is3,is4)
+              DO m1 = 1, ldim
+                 DO m2 = 1, ldim
+                    DO m3 = 1, ldim
+                       DO m4 = 1, ldim
+                          rref(m1,m2,is) = rref(m1,m2,is) + &
+                               CONJG(s1(is1,is3)) * d1(m1,m3) * &
+                               r1(m3,m4,js) * s1(is2,is4) * d1(m2,m4)
+                       END DO
+                    END DO
+                 END DO
+              END DO
+           END DO
+        END DO
+     END DO
+  END DO
+  explicit_err = MAXVAL(ABS(r2-rref))
+  WRITE(*,'(A,1X,ES12.4)') 'explicit direct rotation maxerr=', explicit_err
+  CALL check_block(r2,rref,'explicit direct orbital-spin rotation',failures)
+  CALL hubbard_rotate_nc(ldim,TRANSPOSE(d1),sinv,r1,reff)
+  wrong_convention_err = MAXVAL(ABS(reff-rref))
+  WRITE(*,'(A,1X,ES12.4)') 'old transpose/inverse convention err=', wrong_convention_err
+  IF (wrong_convention_err <= 1.0E-8_DP) THEN
+     WRITE(*,'(A)') 'FAIL rotation test is insensitive to old convention'
+     failures = failures + 1
+  ENDIF
   CALL hubbard_rotate_nc(ldim,TRANSPOSE(d1),sinv,r2,reff)
   CALL check_block(reff,r1,'inverse orbital-spin rotation',failures)
   s2 = (0.0_DP,0.0_DP)
