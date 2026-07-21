@@ -8,6 +8,21 @@
 !-----------------------------------------------------------------------
 subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
      iter, n_iter, file_extension, conv)
+  USE kinds,    ONLY : DP
+  USE mp_bands, ONLY : intra_bgrp_comm
+  implicit none
+  character(len=256) :: file_extension
+  integer :: ndim, iter, n_iter
+  real(DP) :: vout(ndim), vin(ndim), alphamix, dr2, tr2
+  logical :: conv
+
+  call mix_potential_with_comm(ndim, vout, vin, alphamix, dr2, tr2, &
+       iter, n_iter, file_extension, conv, intra_bgrp_comm)
+end subroutine mix_potential
+
+!-----------------------------------------------------------------------
+subroutine mix_potential_with_comm (ndim, vout, vin, alphamix, dr2, tr2, &
+     iter, n_iter, file_extension, conv, mixer_comm)
   !-----------------------------------------------------------------------
   !
   ! Modified Broyden's method for potential/charge density mixing
@@ -31,7 +46,6 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
   !    conv      true if dr2.le.tr2
   !
   USE kinds,           ONLY : DP
-  USE mp_bands,        ONLY : intra_bgrp_comm
   USE mp,              ONLY : mp_sum
   USE io_files,        ONLY : diropn
   !
@@ -40,7 +54,7 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
   !   First the dummy variables
   !
   character (len=256) :: file_extension
-  integer :: ndim, iter, n_iter
+  integer :: ndim, iter, n_iter, mixer_comm
   real(DP) :: vout (ndim), vin (ndim), alphamix, dr2, tr2
   logical :: conv
   !
@@ -77,8 +91,8 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
   dr2 = dnrm2 (ndim, vout, 1) **2
   ndimtot = ndim
   !
-  call mp_sum (dr2, intra_bgrp_comm)
-  call mp_sum (ndimtot, intra_bgrp_comm)
+  call mp_sum (dr2, mixer_comm)
+  call mp_sum (ndimtot, mixer_comm)
   !
   dr2 = (sqrt (dr2) / ndimtot) **2
   !
@@ -134,10 +148,16 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
         dv (n, ipos) = vin (n) - dv (n, ipos)
      enddo
      norm = (dnrm2 (ndim, df (1, ipos), 1) ) **2
-     call mp_sum (norm, intra_bgrp_comm)
+     call mp_sum (norm, mixer_comm)
      norm = sqrt (norm)
-     call dscal (ndim, 1.d0 / norm, df (1, ipos), 1)
-     call dscal (ndim, 1.d0 / norm, dv (1, ipos), 1)
+     if (norm > TINY(1.0_DP)) then
+        call dscal (ndim, 1.d0 / norm, df (1, ipos), 1)
+        call dscal (ndim, 1.d0 / norm, dv (1, ipos), 1)
+     else
+        ! A repeated residual carries no secant information.
+        df(:,ipos) = 0.0_DP
+        dv(:,ipos) = 0.0_DP
+     endif
   endif
   !
   if (saveonfile) then
@@ -169,7 +189,7 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
      do i = 1, iter_used
         do j = i + 1, iter_used
            beta (i, j) = w (i) * w (j) * ddot (ndim, df (1, j), 1, df (1, i), 1)
-           call mp_sum ( beta (i, j), intra_bgrp_comm )
+           call mp_sum ( beta (i, j), mixer_comm )
         enddo
         beta (i, i) = w0**2 + w (i) **2
      enddo
@@ -189,7 +209,7 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
      do i = 1, iter_used
         work (i) = ddot (ndim, df (1, i), 1, vout, 1)
      enddo
-     call mp_sum ( work, intra_bgrp_comm )
+     call mp_sum ( work, mixer_comm )
      !
   end if
   !
@@ -229,7 +249,7 @@ subroutine mix_potential (ndim, vout, vin, alphamix, dr2, tr2, &
   !
   return
   !
-end subroutine mix_potential
+end subroutine mix_potential_with_comm
 
 SUBROUTINE setmixout(in1, in2, mix, dvscfout, dbecsum, ndim, flag )
  !

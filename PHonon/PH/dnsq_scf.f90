@@ -314,10 +314,9 @@ END SUBROUTINE dnsq_scf
 SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   !----------------------------------------------------------------------------
   !! Noncollinear response of the Hubbard occupation matrix.  A finite-q
-  !! magnetic phonon combines direct and -B Sternheimer solutions.  Since
-  !! apply_trev already transforms the auxiliary wavefunctions, their
-  !! occupation overlap enters with a combined orbital-spin transpose.  The
-  !! q=0 electric-field response is completed by its Hermitian adjoint.
+  !! magnetic phonon combines direct and -B Sternheimer solutions using the
+  !! Kramers-transpose spin mapping of incdrhoscf_nc.  The q=0 electric-field
+  !! response is completed by its Hermitian adjoint.
   !! A time-reversal-symmetric calculation obtains the complementary half
   !! from the Kramers partner of the direct solution.
   !

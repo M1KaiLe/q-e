@@ -24,6 +24,9 @@ MODULE hubbard_nc_response
   PUBLIC :: hubbard_kramers_partner_nc
   PUBLIC :: hubbard_response_branch_inplace_nc
   PUBLIC :: hubbard_dv_from_dns_nc
+  PUBLIC :: hubbard_dns_from_dv_nc
+  PUBLIC :: hubbard_energy_pair_nc
+  PUBLIC :: hubbard_qpair_inner_nc
   PUBLIC :: hubbard_reverse_magnetization_nc
   PUBLIC :: hubbard_time_reverse_nc
   PUBLIC :: hubbard_time_reverse_inplace_nc
@@ -55,13 +58,27 @@ CONTAINS
     ist = hub_spin_index(is2, is1)
   END FUNCTION hub_spin_transpose
   !
+  PURE COMPLEX(DP) FUNCTION hubbard_energy_pair_nc(left, right) RESULT(value)
+    !! Contract two matrices in PW's occupation-array convention.  The
+    !! derivative of E_U is stored so that dE_U=sum_ab v_ab*dN_ab; no
+    !! orbital or spin transpose belongs in this contraction.
+    COMPLEX(DP), INTENT(IN) :: left(:,:,:), right(:,:,:)
+    value = SUM(left * right)
+  END FUNCTION hubbard_energy_pair_nc
+  !
+  PURE COMPLEX(DP) FUNCTION hubbard_qpair_inner_nc(left_q, right_q) RESULT(value)
+    !! Use dN_ba(-q)=conjg(dN_ab(q)) to contract a -q/q response pair in
+    !! the same-index Frobenius convention.
+    COMPLEX(DP), INTENT(IN) :: left_q(:,:,:), right_q(:,:,:)
+    value = SUM(CONJG(left_q) * right_q)
+  END FUNCTION hubbard_qpair_inner_nc
+  !
   PURE SUBROUTINE hubbard_branch_indices_nc(branch, m1, m2, is1, is2, &
                                              mbra, mket, sbra, sket, sign)
     !! Projector indices for the magnetic two-Sternheimer construction.
-    !! apply_trev has already applied J*K to the second set of wavefunctions,
-    !! so the -B overlap supplies the missing bra term through an ordinary
-    !! transpose of the combined orbital-spin indices.  Applying J here again
-    !! would time-reverse the spin indices twice.
+    !! apply_trev constructs the auxiliary time-reversed wavefunctions, while
+    !! the physical density response still combines their spin components as
+    !! J R^T J^dagger, consistently with incdrhoscf_nc.
     INTEGER, INTENT(IN) :: branch, m1, m2, is1, is2
     INTEGER, INTENT(OUT) :: mbra, mket, sbra, sket, sign
     IF (branch == 1) THEN
@@ -71,11 +88,8 @@ CONTAINS
        sket = is2
        sign = 1
     ELSE
-       mbra = m2
-       mket = m1
-       sbra = is2
-       sket = is1
-       sign = 1
+       CALL hubbard_kramers_indices_nc(m1, m2, is1, is2, &
+                                       mbra, mket, sbra, sket, sign)
     ENDIF
   END SUBROUTINE hubbard_branch_indices_nc
   !
@@ -145,6 +159,29 @@ CONTAINS
        END DO
     END DO
   END SUBROUTINE hubbard_dv_from_dns_nc
+  !
+  SUBROUTINE hubbard_dns_from_dv_nc(ldim, nat, u_atom, dvhub, dns)
+    !! Inverse Dudarev map used after mixing dV_U with the local response
+    !! potential. Atoms with U=0 remain zero and are not active mixer entries.
+    INTEGER, INTENT(IN) :: ldim, nat
+    REAL(DP), INTENT(IN) :: u_atom(nat)
+    COMPLEX(DP), INTENT(IN) :: dvhub(ldim, ldim, 4, nat)
+    COMPLEX(DP), INTENT(OUT) :: dns(ldim, ldim, 4, nat)
+    INTEGER :: na, m1, m2, is
+    !
+    dns = (0.0_DP, 0.0_DP)
+    DO na = 1, nat
+       IF (ABS(u_atom(na)) <= TINY(1.0_DP)) CYCLE
+       DO is = 1, 4
+          DO m2 = 1, ldim
+             DO m1 = 1, ldim
+                dns(m1,m2,is,na) = -dvhub(m2,m1, &
+                     hub_spin_transpose(is),na) / u_atom(na)
+             END DO
+          END DO
+       END DO
+    END DO
+  END SUBROUTINE hubbard_dns_from_dv_nc
   !
   SUBROUTINE hubbard_reverse_magnetization_nc(ldim, nat, matrix)
     !! Reverse the three magnetic components while preserving charge.

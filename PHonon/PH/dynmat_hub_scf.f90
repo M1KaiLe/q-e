@@ -474,12 +474,12 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE mp_pools,      ONLY : inter_pool_comm
   USE io_global,     ONLY : ionode, stdout
-  USE hubbard_nc_response, ONLY : hub_spin_transpose, hubbard_nc_diag_dyn
+  USE hubbard_nc_response, ONLY : hubbard_qpair_inner_nc, hubbard_nc_diag_dyn
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: irr, nu_i0, nper
   INTEGER :: isolv, nsolv, ik, ikk, ikq, ikmk, npwq, nbnd_branch
-  INTEGER :: ipert, imode, jmode, nrec, ibnd, nt, nah, m1, m2, is
+  INTEGER :: ipert, imode, jmode, nrec, ibnd, nt, nah, ldim_nt
   REAL(DP) :: lmetq0, dvhub_norm2
   COMPLEX(DP), ALLOCATABLE :: dyn1(:,:), dvhub(:,:)
   COMPLEX(DP) :: prj, cross
@@ -533,18 +533,10 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
         DO nah = 1, nat
            nt = ityp(nah)
            IF (.NOT. is_hubbard(nt)) CYCLE
-           DO is = 1, 4
-              DO m1 = 1, 2*Hubbard_l(nt)+1
-                 DO m2 = 1, 2*Hubbard_l(nt)+1
-                     ! dV^U_(m1 s1,m2 s2) = -U * dn_(m2 s2,m1 s1).
-                     ! Contract the SCF and bare responses with this joint
-                     ! orbital-spin transpose, including ud/du blocks.
-                     cross = cross - Hubbard_U(nt) * &
-                          CONJG(dnsscf(m1,m2,is,nah,ipert)) * &
-                          dnsbare_all_modes(m2,m1,hub_spin_transpose(is),nah,imode)
-                 END DO
-              END DO
-           END DO
+           ldim_nt = 2*Hubbard_l(nt)+1
+           cross = cross - Hubbard_U(nt) * hubbard_qpair_inner_nc( &
+                dnsscf(1:ldim_nt,1:ldim_nt,:,nah,ipert), &
+                dnsbare_all_modes(1:ldim_nt,1:ldim_nt,:,nah,imode))
         END DO
         dyn1(ipert,imode) = dyn1(ipert,imode) + cross
      END DO

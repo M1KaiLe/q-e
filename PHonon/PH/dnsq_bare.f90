@@ -347,9 +347,9 @@ END SUBROUTINE dnsq_bare
 SUBROUTINE dnsq_bare_nc()
   !----------------------------------------------------------------------------
   !! Bare projector contribution to the noncollinear Hubbard occupation
-  !! response.  apply_trev already transforms the auxiliary magnetic
-  !! wavefunctions, so branch 2 uses only a combined index transpose.  This
-  !! path is restricted to norm-conserving pseudopotentials.
+  !! response.  The auxiliary magnetic branch uses the same Kramers-transpose
+  !! spin mapping as the standard noncollinear density response.  This path is
+  !! restricted to norm-conserving pseudopotentials.
   !
   USE kinds,         ONLY : DP
   USE io_files,      ONLY : nwordwfcU, seqopn

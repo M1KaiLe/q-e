@@ -33,7 +33,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   !! Step b, c, d are done inside sternheimer_kernel.
   !
   USE kinds,                ONLY : DP
-  USE ions_base,            ONLY : nat
+  USE ions_base,            ONLY : nat, ityp
   USE io_global,            ONLY : stdout, ionode
   USE io_files,             ONLY : prefix, diropn
   USE check_stop,           ONLY : check_stop_now
@@ -72,9 +72,10 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   USE dfile_autoname,       ONLY : dfile_name
   USE save_ph,              ONLY : tmp_dir_save
   ! used oly to write the restart file
-  USE mp_pools,             ONLY : inter_pool_comm
-  USE mp_bands,             ONLY : intra_bgrp_comm, me_bgrp
-  USE mp,                   ONLY : mp_sum
+  USE mp_images,            ONLY : intra_image_comm, root_image
+  USE mp_pools,             ONLY : inter_pool_comm, root_pool, my_pool_id
+  USE mp_bands,             ONLY : intra_bgrp_comm, me_bgrp, root_bgrp, nbgrp
+  USE mp,                   ONLY : mp_sum, mp_bcast, mp_max
   USE efermi_shift,         ONLY : ef_shift, ef_shift_wfc, def
   USE lrus,                 ONLY : int3_paw, becp1, int3_nc
   USE lr_symm_base,         ONLY : irotmq, minus_q, nsymq, rtau
@@ -84,8 +85,11 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   USE control_lr,           ONLY : lgamma
   USE dv_of_drho_lr,        ONLY : dv_of_drho
   USE fft_interfaces,       ONLY : fft_interpolate
-  USE ldaU,                 ONLY : lda_plus_u, Hubbard_lmax
-  USE hubbard_nc_response,  ONLY : hubbard_time_reverse_inplace_nc
+  USE ldaU,                 ONLY : lda_plus_u, Hubbard_lmax, Hubbard_l, Hubbard_U
+  USE ldaU_lr,              ONLY : dnsscf
+  USE hubbard_nc_response,  ONLY : hubbard_time_reverse_inplace_nc, &
+                                   hubbard_dv_from_dns_nc, &
+                                   hubbard_dns_from_dv_nc
   USE nc_mag_aux,           ONLY : int1_nc_save, deeq_nc_save, int3_save
   USE apply_dpot_mod,       ONLY : apply_dpot_allocate, apply_dpot_deallocate
   USE response_kernels,     ONLY : sternheimer_kernel
@@ -104,7 +108,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   !
   ! ... local variables
   !
-  real(DP) :: thresh, averlt, dr2
+  real(DP) :: thresh, averlt, dr2, dr2_local, dr2_hub, dr2_joint, &
+              tr2_mix, local_metric_scale, hub_metric_scale
   ! thresh: convergence threshold
   ! averlt: average number of iterations
   ! dr2   : self-consistency error
@@ -122,14 +127,17 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   complex(DP), allocatable :: ldos (:,:), ldoss (:,:), mixin(:), mixout(:), &
        dbecsum (:,:,:,:), dbecsum_nc(:,:,:,:,:,:), aux2(:,:), drhoc(:), &
        dbecsum_aux (:,:,:,:)
+  complex(DP), allocatable :: dnsscf_in(:,:,:,:,:), dnsscf_out(:,:,:,:,:), &
+       dvhub_in(:,:,:,:,:), dvhub_out(:,:,:,:,:), &
+       joint_mixin(:), joint_mixout(:)
   ! Misc work space
   ! ldos : local density of states af Ef
   ! ldoss: as above, without augmentation charges
   ! dbecsum: the derivative of becsum
   ! drhoc: response core charge density
-  REAL(DP), allocatable :: becsum1(:,:,:)
+  REAL(DP), allocatable :: becsum1(:,:,:), u_atom(:)
 
-  LOGICAL :: all_conv
+  LOGICAL :: all_conv, local_convt, hub_convt, inner_cg_convt, mix_hubbard_nc
   !! True if sternheimer_kernel is converged at all k points and perturbations
   logical :: exst,       & ! used to open the recover file
              lmetq0,     & ! true if xq=(0,0,0) in a metal
@@ -139,6 +147,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
              iter0,      & ! starting iteration
              ipert,      & ! counter on perturbations
              iter,       & ! counter on iterations
+             iter_mix,  & ! local copy used only by the root-pool mixer
              ik, ikk,    & ! counter on k points
              ikq,        & ! counter on k+q points
              ndim,       &
@@ -147,16 +156,23 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
              mode,       & ! mode index
              isolv,      & ! counter on linear systems
              nsolv,      & ! number of linear systems
-             ikmk          ! index of mk
+             ikmk,       & ! index of mk
+             inner_cg_failed
 
   integer  :: npw, npwq
   integer  :: iq_dummy
   real(DP) :: tcpu, get_clock ! timing variables
   character(len=256) :: filename
 
-  integer :: nnr
+  integer :: nnr, ldim_hub, ldim_nt, na, m1, m2, &
+             nlocal_complex, nhub_complex, njoint_complex, &
+             ndim_local, ndim_hub, mix_index
   !
-  IF (rec_code_read > 20 ) RETURN
+  IF (rec_code_read > 20) THEN
+     IF (lda_plus_u .AND. noncolin) CALL errore('solve_linter', &
+          'noncollinear DFPT+U recovery is not supported', 1)
+     RETURN
+  ENDIF
 
   call start_clock ('solve_linter')
 !
@@ -164,6 +180,17 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
 !
   nsolv=1
   IF (noncolin.AND.domag) nsolv=2
+  mix_hubbard_nc = .FALSE.
+  IF (lda_plus_u .AND. noncolin) THEN
+     DO na = 1, nat
+        IF (ABS(Hubbard_U(ityp(na))) > TINY(1.0_DP)) &
+             mix_hubbard_nc = .TRUE.
+     END DO
+  ENDIF
+  IF (mix_hubbard_nc .AND. nbgrp /= 1) CALL errore('solve_linter', &
+       'nbgrp must be 1 for noncollinear DFPT+U joint mixing', 1)
+  hub_convt = .TRUE.
+  dr2_hub = 0.0_DP
 
   allocate (dvscfin ( dfftp%nnr , nspin_mag , npe))
   nnr = dfftp%nnr
@@ -188,12 +215,47 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   IF (noncolin) allocate (dbecsum_nc (nhm,nhm, nat , nspin , npe, nsolv))
   allocate (aux2(npwx*npol, nbnd))
   allocate (drhoc(dfftp%nnr))
+  IF (mix_hubbard_nc) THEN
+     ldim_hub = 2 * Hubbard_lmax + 1
+     ALLOCATE(dnsscf_in(ldim_hub,ldim_hub,4,nat,npe))
+     ALLOCATE(dnsscf_out(ldim_hub,ldim_hub,4,nat,npe))
+     ALLOCATE(dvhub_in(ldim_hub,ldim_hub,4,nat,npe))
+     ALLOCATE(dvhub_out(ldim_hub,ldim_hub,4,nat,npe))
+     ALLOCATE(u_atom(nat))
+     dnsscf_in = (0.0_DP, 0.0_DP)
+     dnsscf_out = (0.0_DP, 0.0_DP)
+     dvhub_in = (0.0_DP, 0.0_DP)
+     dvhub_out = (0.0_DP, 0.0_DP)
+     DO na = 1, nat
+        u_atom(na) = Hubbard_U(ityp(na))
+     END DO
+     nlocal_complex = SIZE(dvscfin)
+     nhub_complex = 0
+     DO na = 1, nat
+        IF (ABS(u_atom(na)) <= TINY(1.0_DP)) CYCLE
+        ldim_nt = 2 * Hubbard_l(ityp(na)) + 1
+        nhub_complex = nhub_complex + 4 * ldim_nt * ldim_nt * npe
+     END DO
+     ndim_local = 2 * nlocal_complex
+     CALL mp_sum(ndim_local, intra_bgrp_comm)
+     ndim_hub = 2 * nhub_complex
+     local_metric_scale = 1.0_DP / SQRT(REAL(ndim_local,DP))
+     hub_metric_scale = 1.0_DP / SQRT(REAL(ndim_hub,DP))
+     njoint_complex = nlocal_complex
+     IF (me_bgrp == root_bgrp) njoint_complex = njoint_complex + nhub_complex
+     ALLOCATE(joint_mixin(njoint_complex), joint_mixout(njoint_complex))
+     joint_mixin = (0.0_DP, 0.0_DP)
+     joint_mixout = (0.0_DP, 0.0_DP)
+  ENDIF
   IF (noncolin.AND.domag.AND.okvan) THEN
      ALLOCATE (int3_save( nhm, nhm, nat, nspin_mag, npe, 2))
      ALLOCATE (dbecsum_aux ( (nhm * (nhm + 1))/2 , nat , nspin_mag , npe))
   ENDIF
   CALL apply_dpot_allocate()
   !
+  IF (mix_hubbard_nc .AND. rec_code_read == 10 .AND. ext_recover) &
+       CALL errore('solve_linter', &
+       'noncollinear DFPT+U recovery is not supported', 1)
   if (rec_code_read == 10.AND.ext_recover) then
      ! restart from Phonon calculation
      IF (okpaw) THEN
@@ -316,6 +378,10 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
      ENDDO ! isolv
   ENDDO ! ik
   !
+  ! The recovery record does not yet contain the joint HXC/Hubbard state.
+  IF (mix_hubbard_nc .AND. iter0 > 0) CALL errore('solve_linter', &
+       'noncollinear DFPT+U recovery is not supported', 1)
+  !
   !   The outside loop is over the iterations
   !
   do kter = 1, niter_ph
@@ -328,10 +394,14 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
      dbecsum = (0.d0, 0.d0)
      IF (noncolin) dbecsum_nc = (0.d0, 0.d0)
      !
-     ! DFPT+U: at each ph iteration calculate dnsscf,
-     ! i.e. the scf variation of the occupation matrix ns.
+     ! The legacy collinear path forms dnsscf from the preceding dpsi records.
+     ! The noncollinear path keeps a separately mixed Hubbard input and forms
+     ! its new output after both Sternheimer branches below.
      !
-     IF (lda_plus_u .AND. (iter /= 1)) CALL dnsq_scf(npe, lmetq0, imode0, irr, .true.)
+     IF (lda_plus_u .AND. (.NOT. mix_hubbard_nc) .AND. (iter /= 1)) &
+          CALL dnsq_scf(npe, lmetq0, imode0, irr, .true.)
+     IF (mix_hubbard_nc) dnsscf = dnsscf_in
+     inner_cg_convt = .TRUE.
      !
      ! Start the loop on the two linear systems, one at B and one at -B
      !
@@ -369,6 +439,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         CALL sternheimer_kernel(first_iter, isolv==2, npe, lrbar, iubar, &
             thresh, dvscfins, all_conv, averlt, drhoscf, dbecsum, &
             dbecsum_nc(:,:,:,:,:,isolv))
+        IF (mix_hubbard_nc) inner_cg_convt = inner_cg_convt .AND. all_conv
         !
         !  reset the original magnetic field if it was changed
         !
@@ -390,6 +461,11 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         ENDIF
         !
      END DO ! isolv
+     IF (mix_hubbard_nc) THEN
+        inner_cg_failed = MERGE(0, 1, inner_cg_convt)
+        CALL mp_max(inner_cg_failed, intra_image_comm)
+        inner_cg_convt = inner_cg_failed == 0
+     ENDIF
      !
      IF (nsolv==2) THEN
         drhoscf = drhoscf / 2.0_DP
@@ -493,22 +569,122 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         !
      enddo
      !
-     !   And we mix with the old potential
+     ! Form the Hubbard output after ef_shift has updated the metallic
+     ! occupation term. Mix dV_HXC and dV_U in one Broyden vector.
      !
-     IF (okpaw) THEN
+     IF (mix_hubbard_nc) THEN
+        CALL dnsq_scf(npe, lmetq0, imode0, irr, .true.)
+        dnsscf_out = dnsscf
+        DO ipert = 1, npe
+           CALL hubbard_dv_from_dns_nc(ldim_hub, nat, u_atom, &
+                dnsscf_out(:,:,:,:,ipert), dvhub_out(:,:,:,:,ipert))
+        END DO
+
+        joint_mixin(1:nlocal_complex) = local_metric_scale * &
+             RESHAPE(dvscfin, (/ nlocal_complex /))
+        joint_mixout(1:nlocal_complex) = local_metric_scale * &
+             RESHAPE(dvscfout, (/ nlocal_complex /))
+        mix_index = nlocal_complex
+        IF (me_bgrp == root_bgrp) THEN
+           DO ipert = 1, npe
+              DO na = 1, nat
+                 IF (ABS(u_atom(na)) <= TINY(1.0_DP)) CYCLE
+                 ldim_nt = 2 * Hubbard_l(ityp(na)) + 1
+                 DO is = 1, 4
+                    DO m2 = 1, ldim_nt
+                       DO m1 = 1, ldim_nt
+                          mix_index = mix_index + 1
+                          joint_mixin(mix_index) = hub_metric_scale * &
+                               dvhub_in(m1,m2,is,na,ipert)
+                          joint_mixout(mix_index) = hub_metric_scale * &
+                               dvhub_out(m1,m2,is,na,ipert)
+                       END DO
+                    END DO
+                 END DO
+              END DO
+           END DO
+        ENDIF
+        IF (mix_index /= njoint_complex) CALL errore('solve_linter', &
+             'inconsistent Hubbard joint-mixer packing', 1)
+
+        dr2_local = SUM(ABS(dvscfout-dvscfin)**2)
+        CALL mp_sum(dr2_local, intra_bgrp_comm)
+        dr2_local = (SQRT(dr2_local) / REAL(ndim_local,DP))**2
+
+        dr2_hub = SUM(ABS(dvhub_out-dvhub_in)**2)
+        dr2_hub = (SQRT(dr2_hub) / REAL(ndim_hub,DP))**2
+
+        ! Pool reductions can differ by a few ulps.  Use the conservative
+        ! image-wide residual so every rank crosses the convergence gate on
+        ! the same iteration.
+        CALL mp_max(dr2_local, intra_image_comm)
+        CALL mp_max(dr2_hub, intra_image_comm)
+
+        local_convt = dr2_local < npe*tr2_ph/npol
+        hub_convt = dr2_hub < npe*tr2_ph/npol
+        convt = local_convt .AND. hub_convt .AND. inner_cg_convt
+        CALL check_all_convt(convt)
+        tr2_mix = -1.0_DP
+        IF (convt) tr2_mix = HUGE(1.0_DP)
+        iter_mix = iter
+        IF (my_pool_id == 0) THEN
+           CALL mix_potential_with_comm(2*njoint_complex, joint_mixout, joint_mixin, &
+                alpha_mix(kter), dr2_joint, tr2_mix, iter_mix, nmix_ph, &
+                flmixdpot, convt, intra_bgrp_comm)
+        ENDIF
+        CALL mp_bcast(convt, root_pool, inter_pool_comm)
+        convt = convt .AND. local_convt .AND. hub_convt .AND. inner_cg_convt
+
+        IF (my_pool_id == 0) THEN
+           dvscfin = RESHAPE(joint_mixin(1:nlocal_complex) / &
+                local_metric_scale, SHAPE(dvscfin))
+        ENDIF
+        CALL mp_bcast(dvscfin, root_pool, inter_pool_comm)
+        dvhub_in = (0.0_DP, 0.0_DP)
+        mix_index = nlocal_complex
+        IF (my_pool_id == 0 .AND. me_bgrp == root_bgrp) THEN
+           DO ipert = 1, npe
+              DO na = 1, nat
+                 IF (ABS(u_atom(na)) <= TINY(1.0_DP)) CYCLE
+                 ldim_nt = 2 * Hubbard_l(ityp(na)) + 1
+                 DO is = 1, 4
+                    DO m2 = 1, ldim_nt
+                       DO m1 = 1, ldim_nt
+                          mix_index = mix_index + 1
+                          dvhub_in(m1,m2,is,na,ipert) = &
+                               joint_mixin(mix_index) / hub_metric_scale
+                       END DO
+                    END DO
+                 END DO
+              END DO
+              CALL hubbard_dns_from_dv_nc(ldim_hub, nat, u_atom, &
+                   dvhub_in(:,:,:,:,ipert), dnsscf_in(:,:,:,:,ipert))
+           END DO
+        ENDIF
+        CALL mp_bcast(dnsscf_in, root_image, intra_image_comm)
+        DO ipert = 1, npe
+           CALL hubbard_dv_from_dns_nc(ldim_hub, nat, u_atom, &
+                dnsscf_in(:,:,:,:,ipert), dvhub_in(:,:,:,:,ipert))
+        END DO
+        dnsscf = dnsscf_in
+        dr2_joint = MAX(dr2_local, dr2_hub)
+        dr2 = dr2_joint
+     ELSE IF (okpaw) THEN
         !
         !  In this case we mix also dbecsum
         !
+        tr2_mix = npe*tr2_ph/npol
         call setmixout(npe*dfftp%nnr*nspin_mag,(nhm*(nhm+1)*nat*nspin_mag*npe)/2, &
                     mixout, dvscfout, dbecsum, ndim, -1 )
         call mix_potential (2*npe*dfftp%nnr*nspin_mag+2*ndim, mixout, mixin, &
-                         alpha_mix(kter), dr2, npe*tr2_ph/npol, iter, &
+                         alpha_mix(kter), dr2, tr2_mix, iter, &
                          nmix_ph, flmixdpot, convt)
         call setmixout(npe*dfftp%nnr*nspin_mag,(nhm*(nhm+1)*nat*nspin_mag*npe)/2, &
                        mixin, dvscfin, dbecsum, ndim, 1 )
      ELSE
+        tr2_mix = npe*tr2_ph/npol
         call mix_potential (2*npe*dfftp%nnr*nspin_mag, dvscfout, dvscfin, &
-                         alpha_mix(kter), dr2, npe*tr2_ph/npol, iter, &
+                         alpha_mix(kter), dr2, tr2_mix, iter, &
                          nmix_ph, flmixdpot, convt)
      ENDIF
      !
@@ -577,8 +753,23 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
      WRITE( stdout, '(/,5x," iter # ",i3," total cpu time :",f8.1, &
           &      " secs   av.it.: ",f5.1)') iter, tcpu, averlt
      dr2 = dr2 / npe
-     WRITE( stdout, '(5x," thresh=",es10.3, " alpha_mix = ",f6.3, &
-          &      " |ddv_scf|^2 = ",es10.3 )') thresh, alpha_mix (kter) , dr2
+     IF (mix_hubbard_nc) THEN
+        WRITE(stdout,'(5x," thresh=",es10.3," alpha_mix = ",f6.3, &
+             &" |ddv_scf|^2 = ",es10.3)') thresh, alpha_mix(kter), &
+             dr2_local/npe
+     ELSE
+        WRITE(stdout,'(5x," thresh=",es10.3," alpha_mix = ",f6.3, &
+             &" |ddv_scf|^2 = ",es10.3)') thresh, alpha_mix(kter), dr2
+     ENDIF
+     IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,a,f8.4,a,es16.8,a,l1)') &
+          'DFPTU_NC_HUB_MIX iter=', iter, ' alpha=', alpha_mix(kter), &
+          ' residual=', dr2_hub, ' converged=', hub_convt
+     IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,a,l1)') &
+          'DFPTU_NC_INNER_CG iter=', iter, ' converged=', inner_cg_convt
+     IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,3(a,es16.8),2(a,l1))') &
+          'DFPTU_NC_JOINT_MIX iter=', iter, ' local=', dr2_local, &
+          ' hubbard=', dr2_hub, ' joint=', dr2_joint, &
+          ' local_converged=', local_convt, ' hubbard_converged=', hub_convt
      !
      !    Here we save the information for recovering the run from this poin
      !
@@ -594,6 +785,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
      ENDIF
 
      if (check_stop_now()) call stop_smoothly_ph (.false.)
+     IF (convt .AND. mix_hubbard_nc) dnsscf = dnsscf_out
      if (convt) goto 155
   enddo
 155 iter0=0
@@ -637,6 +829,10 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   deallocate (dvscfin)
   deallocate(aux2)
   deallocate(drhoc)
+  IF (mix_hubbard_nc) THEN
+     DEALLOCATE(dnsscf_in, dnsscf_out, dvhub_in, dvhub_out, u_atom, &
+          joint_mixin, joint_mixout)
+  ENDIF
   IF (noncolin.AND.domag.AND.okvan) THEN
      DEALLOCATE (int3_save)
      DEALLOCATE (dbecsum_aux)

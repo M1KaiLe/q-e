@@ -636,8 +636,8 @@ SUBROUTINE dynmat_hub_bare_nc()
   USE mp,            ONLY : mp_sum
   USE mp_bands,      ONLY : intra_bgrp_comm
   USE mp_pools,      ONLY : inter_pool_comm
-  USE hubbard_nc_response, ONLY : hub_spin_index, hub_spin_transpose, &
-                                  hubbard_nc_diag_dyn
+  USE hubbard_nc_response, ONLY : hub_spin_index, hubbard_energy_pair_nc, &
+                                  hubbard_qpair_inner_nc, hubbard_nc_diag_dyn
   !
   IMPLICIT NONE
   INTEGER :: ik, ikk, npw, na, nap, nt, ldim, ldim_nt
@@ -751,24 +751,13 @@ SUBROUTINE dynmat_hub_bare_nc()
                  IF (.NOT. is_hubbard(ityp(nt))) CYCLE
                  ldim_nt = 2 * Hubbard_l(ityp(nt)) + 1
                  IF (na == nt .AND. nap == nt) THEN
-                    DO is = 1, 4
-                       DO m1 = 1, ldim_nt
-                          DO m2 = 1, ldim_nt
-                             term = term + v%ns_nc(m1,m2,is,nt) * &
-                                  d2n(m2,m1,hub_spin_transpose(is),nt,icart,jcart)
-                          END DO
-                       END DO
-                    END DO
+                    term = term + hubbard_energy_pair_nc( &
+                         v%ns_nc(1:ldim_nt,1:ldim_nt,:,nt), &
+                         d2n(1:ldim_nt,1:ldim_nt,:,nt,icart,jcart))
                  ENDIF
-                 DO is = 1, 4
-                    DO m1 = 1, ldim_nt
-                       DO m2 = 1, ldim_nt
-                           term = term - Hubbard_U(ityp(nt)) * &
-                                CONJG(dnsbare(m1,m2,is,nt,icart,na)) * &
-                                dnsbare(m2,m1,hub_spin_transpose(is),nt,jcart,nap)
-                       END DO
-                    END DO
-                 END DO
+                 term = term - Hubbard_U(ityp(nt)) * hubbard_qpair_inner_nc( &
+                      dnsbare(1:ldim_nt,1:ldim_nt,:,nt,icart,na), &
+                      dnsbare(1:ldim_nt,1:ldim_nt,:,nt,jcart,nap))
               END DO
               dynwrk(ia_cart,ib_cart) = term
            END DO

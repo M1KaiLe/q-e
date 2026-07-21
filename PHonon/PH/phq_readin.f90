@@ -804,9 +804,8 @@ SUBROUTINE phq_readin()
                &" Hubbard_lmax=",i2," J0_max=",es12.4)') noncolin, lspinorb, &
                domag, no_t_rev, nspin, npol, okvan, okpaw, TRIM(Hubbard_projectors), &
                Hubbard_lmax, MAXVAL(ABS(Hubbard_J0))
-          WRITE(stdout,'(5x,"DFPTU_NC_Q iq=",i4," q=",3f14.8," nsym=",i3, &
-               &" antiunitary_count=",i3)') current_iq, xq, nsym, &
-               COUNT(t_rev(1:nsym) /= 0)
+          WRITE(stdout,'(5x,"DFPTU_NC_SYM nsym=",i3," antiunitary_count=",i3)') &
+               nsym, COUNT(t_rev(1:nsym) /= 0)
       ENDIF
      !
   ENDIF

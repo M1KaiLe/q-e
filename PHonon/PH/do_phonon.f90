@@ -43,6 +43,7 @@ SUBROUTINE do_phonon(auxdyn)
   USE io_global,      ONLY : stdout
   ! FIXME: see below setup_pw
   USE noncollin_module, ONLY : noncolin, domag
+  USE ldaU,             ONLY : lda_plus_u
   USE ahc,            ONLY : elph_ahc, elph_do_ahc
   USE io_files,       ONLY : iunwfc
   USE buffers,        ONLY : close_buffer
@@ -116,8 +117,20 @@ SUBROUTINE do_phonon(auxdyn)
      !
      IF ( trans ) THEN
         !
+        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+           WRITE(stdout,'(5x,A,I0,A)') 'DFPTU_NC_STAGE iq=', iq, ' before_phqscf'
+           FLUSH(stdout)
+        ENDIF
         CALL phqscf()
+        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+           WRITE(stdout,'(5x,A,I0,A)') 'DFPTU_NC_STAGE iq=', iq, ' after_phqscf'
+           FLUSH(stdout)
+        ENDIF
         CALL dynmatrix_new(iq)
+        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+           WRITE(stdout,'(5x,A,I0,A)') 'DFPTU_NC_STAGE iq=', iq, ' after_dynmatrix'
+           FLUSH(stdout)
+        ENDIF
         !
      END IF
      !

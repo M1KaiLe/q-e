@@ -16,7 +16,7 @@ PROGRAM Q2QSTAR
   !! Useful for debugging and for producing the star of the wannier-phonon code output.
   !
   !! Syntax:  
-  !!   \(\texttt{q2qstar.x}\) filein [fileout]
+  !!   \(\texttt{q2qstar.x}\) filein [fileout] [--unitary-magnetic]
   !
   !! fileout default: rot_filein (old format) or rot_filein.xml (new format) 
   !
@@ -29,7 +29,9 @@ PROGRAM Q2QSTAR
   USE io_global,          ONLY : ionode_id, ionode, stdout
   USE environment,        ONLY : environment_start, environment_end
   ! symmetry
-  USE symm_base,          ONLY : s, invs, nsym, find_sym, set_sym_bl, irt, copy_sym, nrot, inverse_s
+  USE symm_base,          ONLY : s, invs, nsym, find_sym, set_sym_bl, set_sym, &
+                                 irt, copy_sym, nrot, inverse_s, no_t_rev, &
+                                 time_reversal
   ! for reading the dyn.mat.
   USE cell_base,          ONLY : at, bg, celldm, ibrav, omega
   USE ions_base,          ONLY : nat, ityp, ntyp => nsp, atm, tau, amass
@@ -51,13 +53,13 @@ PROGRAM Q2QSTAR
   IMPLICIT NONE
   !
   CHARACTER(len=7),PARAMETER :: CODE="Q2QSTAR"
-  CHARACTER(len=256) :: fildyn, filout
+  CHARACTER(len=256) :: fildyn, filout, symmetry_mode
   INTEGER :: ierr, nargs
   !
   INTEGER       :: nqs, isq (48), imq, nqq
   REAL(DP)      :: sxq(3, 48), xq(3), xqs(3,48), epsilon(3,3)
   !
-  LOGICAL :: sym(48), lrigid
+  LOGICAL :: sym(48), lrigid, unitary_magnetic
   LOGICAL, EXTERNAL :: has_xml
   !
   COMPLEX(DP),ALLOCATABLE :: phi(:,:,:,:), d2(:,:)
@@ -69,7 +71,8 @@ PROGRAM Q2QSTAR
   CALL environment_start(CODE)
   !
   nargs = command_argument_count()
-  IF(nargs < 1) CALL errore(CODE, 'Argument is missing! Syntax: "q2qstar dynfile [outfile]"', 1)
+  IF(nargs < 1 .OR. nargs > 3) CALL errore(CODE, &
+       'Syntax: q2qstar dynfile [outfile] [--unitary-magnetic]', 1)
   !
   CALL get_command_argument(1, fildyn)
   CALL mp_bcast(fildyn, ionode_id,world_comm)
@@ -85,6 +88,14 @@ PROGRAM Q2QSTAR
       filout = "rot_"//TRIM(fildyn)
   ENDIF
   CALL mp_bcast(filout, ionode_id,world_comm)
+  unitary_magnetic = .FALSE.
+  IF (nargs > 2) THEN
+     CALL get_command_argument(3, symmetry_mode)
+     unitary_magnetic = TRIM(symmetry_mode) == '--unitary-magnetic'
+     IF (.NOT. unitary_magnetic) CALL errore(CODE, &
+          'unknown symmetry mode: '//TRIM(symmetry_mode), 1)
+  ENDIF
+  CALL mp_bcast(unitary_magnetic, ionode_id, world_comm)
   !
   ! ######################### reading ######################### 
   XML_FORMAT_READ : &
@@ -128,6 +139,10 @@ PROGRAM Q2QSTAR
     amass = amass/amu_ry
     !
   ENDIF XML_FORMAT_READ
+  IF (unitary_magnetic .AND. .NOT. xmldyn) CALL errore(CODE, &
+       '--unitary-magnetic requires an XML dynamical matrix', 1)
+  IF (unitary_magnetic .AND. nspin_mag /= 4) CALL errore(CODE, &
+       '--unitary-magnetic requires SPIN_COMPONENTS=4', 1)
   !
   ! regenerate the lattice
   CALL latgen(ibrav,celldm,at(1,1),at(1,2),at(1,3),omega)
@@ -139,17 +154,22 @@ PROGRAM Q2QSTAR
   WRITE(stdout,'(//,5x,a,3f14.9/)') "Dynamical matrix at q =", xq
   !
   ! ######################### symmetry setup #########################
+  IF (.NOT. ALLOCATED(m_loc)) THEN
+     ALLOCATE(m_loc(3,nat))
+     m_loc = 0._DP
+  ENDIF
   ! ~~~~~~~~ setup bravais lattice symmetry ~~~~~~~~ 
-  CALL set_sym_bl ( )
+  IF (unitary_magnetic) THEN
+     no_t_rev = .TRUE.
+     CALL set_sym(nat, tau, ityp, nspin_mag, m_loc)
+  ELSE
+     CALL set_sym_bl()
+  ENDIF
   WRITE(stdout, '(5x,a,i3)') "Symmetries of bravais lattice: ", nrot
   !
   ! ~~~~~~~~ setup crystal symmetry ~~~~~~~~ 
-  IF(.not.allocated(m_loc))  THEN
-    ALLOCATE(m_loc(3,nat))
-    m_loc = 0._dp
-  ENDIF
-  
-  CALL find_sym ( nat, tau, ityp, .false., m_loc )
+  IF (.NOT. unitary_magnetic) &
+       CALL find_sym(nat, tau, ityp, .FALSE., m_loc)
   WRITE(stdout, '(5x,a,i3)') "Symmetries of crystal:         ", nsym
   !
   ! ~~~~~~~~ setup small group of q symmetry ~~~~~~~~ 
@@ -158,6 +178,7 @@ PROGRAM Q2QSTAR
   sym = .false.
   sym(1:nsym) = .true.
   CALL smallg_q(xq, 0, at, bg, nsym, s, sym, minus_q)
+  IF (.NOT. time_reversal) minus_q = .FALSE.
   nsymq = copy_sym(nsym, sym)
   ! recompute the inverses as the order of sym.ops. has changed
   CALL inverse_s ( ) 
