@@ -109,7 +109,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   ! ... local variables
   !
   real(DP) :: thresh, averlt, dr2, dr2_local, dr2_hub, dr2_joint, &
-              tr2_mix, local_metric_scale, hub_metric_scale
+              tr2_mix, tr2_local, tr2_hub, local_metric_scale, &
+              hub_metric_scale
   ! thresh: convergence threshold
   ! averlt: average number of iterations
   ! dr2   : self-consistency error
@@ -620,8 +621,12 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         CALL mp_max(dr2_local, intra_image_comm)
         CALL mp_max(dr2_hub, intra_image_comm)
 
-        local_convt = dr2_local < npe*tr2_ph/npol
-        hub_convt = dr2_hub < npe*tr2_ph/npol
+        tr2_local = npe*tr2_ph/npol
+        ! mix_potential defines dr2 as sum(|dV|^2)/ndim^2.  Scale the
+        ! Hubbard gate so both blocks use the same per-component RMS limit.
+        tr2_hub = tr2_local * REAL(ndim_local,DP) / REAL(ndim_hub,DP)
+        local_convt = dr2_local < tr2_local
+        hub_convt = dr2_hub < tr2_hub
         convt = local_convt .AND. hub_convt .AND. inner_cg_convt
         CALL check_all_convt(convt)
         tr2_mix = -1.0_DP
@@ -667,7 +672,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
                 dnsscf_in(:,:,:,:,ipert), dvhub_in(:,:,:,:,ipert))
         END DO
         dnsscf = dnsscf_in
-        dr2_joint = MAX(dr2_local, dr2_hub)
+        dr2_joint = MAX(dr2_local, dr2_hub * REAL(ndim_hub,DP) / &
+             REAL(ndim_local,DP))
         dr2 = dr2_joint
      ELSE IF (okpaw) THEN
         !
@@ -766,6 +772,11 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
           ' residual=', dr2_hub, ' converged=', hub_convt
      IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,a,l1)') &
           'DFPTU_NC_INNER_CG iter=', iter, ' converged=', inner_cg_convt
+     IF (mix_hubbard_nc .AND. iter == 1) &
+          WRITE(stdout,'(5x,a,2(a,es16.8),2(a,i12))') &
+          'DFPTU_NC_CONV_THRESH', ' local=', tr2_local, &
+          ' hubbard=', tr2_hub, ' ndim_local=', ndim_local, &
+          ' ndim_hubbard=', ndim_hub
      IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,3(a,es16.8),2(a,l1))') &
           'DFPTU_NC_JOINT_MIX iter=', iter, ' local=', dr2_local, &
           ' hubbard=', dr2_hub, ' joint=', dr2_joint, &
