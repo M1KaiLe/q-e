@@ -373,7 +373,11 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   ALLOCATE(dns_adjoint(ldim,ldim,4,nat))
   dnsscf = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag .AND. lflag)
-  CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
+  IF (domag) THEN
+     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
+  ELSE
+     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs)
+  ENDIF
   !
   DO isolv = 1, nsolv
      dns_branch = (0.0_DP, 0.0_DP)

@@ -383,24 +383,38 @@ CONTAINS
   END SUBROUTINE hubbard_nc_diag_dyn
   !
   SUBROUTINE hubbard_nc_diag_qmap(iq, ikks_in, ikqs_in, ikmks_in)
-    !! Print a deterministic checksum of the direct, k+q and time-reversed
-    !! record maps used by the two Sternheimer branches.
+    !! Print a deterministic checksum of the record maps used by the active
+    !! Sternheimer branches.  The time-reversed map is absent for nonmagnetic
+    !! noncollinear calculations.
     USE io_global, ONLY : ionode, stdout
     INTEGER, INTENT(IN) :: iq
-    INTEGER, INTENT(IN) :: ikks_in(:), ikqs_in(:), ikmks_in(:)
-    INTEGER :: ik, bad, hash
+    INTEGER, INTENT(IN) :: ikks_in(:), ikqs_in(:)
+    INTEGER, INTENT(IN), OPTIONAL :: ikmks_in(:)
+    INTEGER :: ik, bad
+    INTEGER(KIND=8) :: hash
     !
     IF (.NOT. ionode) RETURN
     bad = 0
     hash = 0
-    DO ik = 1, SIZE(ikks_in)
-       IF (ikks_in(ik) < 1 .OR. ikqs_in(ik) < 1 .OR. ikmks_in(ik) < 1) bad = bad + 1
-       hash = MOD(hash + 17*ikks_in(ik) + 31*ikqs_in(ik) + 47*ikmks_in(ik), 2147483629)
-    END DO
-    WRITE(stdout,'(5x,"DFPTU_NC_QMAP iq=",i4," nksq=",i6," bad=",i4, &
-         &" hash=",i12," first=",3i6," last=",3i6)') iq, SIZE(ikks_in), bad, hash, &
-         ikks_in(1), ikqs_in(1), ikmks_in(1), &
-         ikks_in(SIZE(ikks_in)), ikqs_in(SIZE(ikqs_in)), ikmks_in(SIZE(ikmks_in))
+    IF (PRESENT(ikmks_in)) THEN
+       DO ik = 1, SIZE(ikks_in)
+          IF (ikks_in(ik) < 1 .OR. ikqs_in(ik) < 1 .OR. ikmks_in(ik) < 1) bad = bad + 1
+          hash = MOD(hash + 17_8*ikks_in(ik) + 31_8*ikqs_in(ik) + &
+               47_8*ikmks_in(ik), 2147483629_8)
+       END DO
+       WRITE(stdout,'(5x,"DFPTU_NC_QMAP iq=",i4," nksq=",i6," bad=",i4, &
+            &" hash=",i12," first=",3i6," last=",3i6)') iq, SIZE(ikks_in), bad, hash, &
+            ikks_in(1), ikqs_in(1), ikmks_in(1), &
+            ikks_in(SIZE(ikks_in)), ikqs_in(SIZE(ikqs_in)), ikmks_in(SIZE(ikmks_in))
+    ELSE
+       DO ik = 1, SIZE(ikks_in)
+          IF (ikks_in(ik) < 1 .OR. ikqs_in(ik) < 1) bad = bad + 1
+          hash = MOD(hash + 17_8*ikks_in(ik) + 31_8*ikqs_in(ik), 2147483629_8)
+       END DO
+       WRITE(stdout,'(5x,"DFPTU_NC_QMAP_DIRECT iq=",i4," nksq=",i6," bad=",i4, &
+            &" hash=",i12," first=",2i6," last=",2i6)') iq, SIZE(ikks_in), bad, hash, &
+            ikks_in(1), ikqs_in(1), ikks_in(SIZE(ikks_in)), ikqs_in(SIZE(ikqs_in))
+    ENDIF
   END SUBROUTINE hubbard_nc_diag_qmap
   !
 END MODULE hubbard_nc_response

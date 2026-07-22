@@ -549,6 +549,8 @@ PROGRAM test_hubbard_nc_response
      WRITE(*,'(A)') 'FAIL response format marker'
      failures = failures + 1
   ENDIF
+  CALL hubbard_nc_diag_qmap(0,[1,3],[2,4])
+  CALL hubbard_nc_diag_qmap(0,[1,3],[2,4],[5,6])
   IF (failures /= 0) ERROR STOP 1
   WRITE(*,'(A)') 'PASS hubbard_nc_response'
 

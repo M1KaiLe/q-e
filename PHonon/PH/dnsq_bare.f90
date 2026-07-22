@@ -409,7 +409,11 @@ SUBROUTINE dnsq_bare_nc()
   ALLOCATE(band_weight(nbnd))
   dnsbare = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag)
-  CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
+  IF (domag) THEN
+     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
+  ELSE
+     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs)
+  ENDIF
   !
   iunit = 37
   exst = .FALSE.
