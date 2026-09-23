@@ -374,9 +374,9 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
   dnsscf = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag .AND. lflag)
   IF (domag) THEN
-     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
+     IF (iverbosity > 0) CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
   ELSE
-     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs)
+     IF (iverbosity > 0) CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs)
   ENDIF
   !
   DO isolv = 1, nsolv
@@ -506,7 +506,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
               'DFPT+U NC dns branch ', isolv, ': frob=', branch_norm, &
               ' max=', branch_max
       ENDIF
-      CALL hubbard_nc_diag_response5('dns_branch', current_iq, isolv, dns_branch)
+      IF (iverbosity > 0) CALL hubbard_nc_diag_response5('dns_branch', current_iq, isolv, dns_branch)
       dnsscf = dnsscf + dns_branch
    END DO
    IF (iverbosity > 0) THEN
@@ -515,7 +515,7 @@ SUBROUTINE dnsq_scf_nc(npe, lmetq0, imode0, irr, lflag)
       WRITE(stdout,'(5x,a,es14.6,a,es14.6)') &
            'DFPT+U NC dnsscf total: frob=', total_norm, ' max=', total_max
    ENDIF
-   CALL hubbard_nc_diag_response5('dnsscf_total', current_iq, 0, dnsscf)
+   IF (iverbosity > 0) CALL hubbard_nc_diag_response5('dnsscf_total', current_iq, 0, dnsscf)
    !
   IF (lflag) THEN
      CALL sym_dns_nc(ldim, npe, irr, dnsscf)

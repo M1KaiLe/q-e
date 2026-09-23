@@ -410,9 +410,9 @@ SUBROUTINE dnsq_bare_nc()
   dnsbare = (0.0_DP, 0.0_DP)
   nsolv = MERGE(2, 1, domag)
   IF (domag) THEN
-     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
+     IF (iverbosity > 0) CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs, ikmks)
   ELSE
-     CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs)
+     IF (iverbosity > 0) CALL hubbard_nc_diag_qmap(current_iq, ikks, ikqs)
   ENDIF
   !
   iunit = 37
@@ -546,7 +546,7 @@ SUBROUTINE dnsq_bare_nc()
               END DO
            END DO
           CALL mp_sum(dns_branch, inter_pool_comm)
-         CALL hubbard_nc_diag_response6('bare_branch', current_iq, isolv, dns_branch)
+         IF (iverbosity > 0) CALL hubbard_nc_diag_response6('bare_branch', current_iq, isolv, dns_branch)
          IF (iverbosity > 0) THEN
             branch_norm = SQRT(SUM(ABS(dns_branch)**2))
             branch_max = MAXVAL(ABS(dns_branch))
@@ -564,7 +564,7 @@ SUBROUTINE dnsq_bare_nc()
         WRITE(iunit,*) dnsbare
      ENDIF
   ENDIF
-  CALL hubbard_nc_diag_response6('bare_total', current_iq, 0, dnsbare)
+  IF (iverbosity > 0) CALL hubbard_nc_diag_response6('bare_total', current_iq, 0, dnsbare)
   IF (ionode) CLOSE(iunit,STATUS='keep')
   !
   CALL sym_dns_wrapper(ldim, dnsbare, dnsbare_all_modes)

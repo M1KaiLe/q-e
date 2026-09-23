@@ -29,7 +29,7 @@ SUBROUTINE do_phonon(auxdyn)
   !
 
   USE disp,            ONLY : nqs
-  USE control_flags,   ONLY : use_gpu
+  USE control_flags,   ONLY : use_gpu, iverbosity
   USE control_ph,      ONLY : epsil, trans, qplot, only_init, &
                               only_wfc, rec_code, where_rec, reduce_io
   USE el_phon,         ONLY : elph, elph_mat, elph_simple, elph_epa, elph_print
@@ -117,17 +117,17 @@ SUBROUTINE do_phonon(auxdyn)
      !
      IF ( trans ) THEN
         !
-        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') 'DFPTU_NC_STAGE iq=', iq, ' before_phqscf'
            FLUSH(stdout)
         ENDIF
         CALL phqscf()
-        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') 'DFPTU_NC_STAGE iq=', iq, ' after_phqscf'
            FLUSH(stdout)
         ENDIF
         CALL dynmatrix_new(iq)
-        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') 'DFPTU_NC_STAGE iq=', iq, ' after_dynmatrix'
            FLUSH(stdout)
         ENDIF

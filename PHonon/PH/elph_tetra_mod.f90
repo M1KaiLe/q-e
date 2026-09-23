@@ -43,7 +43,7 @@ SUBROUTINE elph_tetra_lambda()
   USE io_global, ONLY : stdout, ionode, ionode_id
   USE cell_base, ONLY : at, bg
   USE ions_base, ONLY : nat
-  USE symm_base, ONLY : s, irt, nsym, invs
+  USE symm_base, ONLY : s, irt, nsym, invs, t_rev
   USE klist,  ONLY: nks, nkstot
   USE wvfct, ONLY: et, nbnd
   USE qpoint, ONLY : xq, nksq, ikks
@@ -230,7 +230,7 @@ SUBROUTINE elph_tetra_lambda()
   elph_dir='elph_dir/'
   CALL create_directory( elph_dir )
   !
-  call star_q (xq, at, bg, nsym, s, invs, nq, sxq, isq, imq, .TRUE. )
+  call star_q1 (xq, at, bg, nsym, s, invs, nq, sxq, isq, imq, .TRUE. , t_rev)
   !
   DO isig = 1, el_ph_nsigma !=nsig in elphsum
      filelph = TRIM(elph_dir)//'a2Fq2r.'// TRIM(int_to_char(50 + isig)) &
@@ -257,7 +257,7 @@ SUBROUTINE elph_tetra_lambda()
      xmldyn_save=xmldyn
      xmldyn=.FALSE.
      CALL q2qstar_ph (dyn22, at, bg, nat, nsym, s, invs, &
-          irt, rtau, nq, sxq, isq, imq, iuelph)
+          irt, rtau, nq, sxq, isq, imq, iuelph, t_rev)
      xmldyn=xmldyn_save
      IF (ionode) CLOSE( UNIT = iuelph, STATUS = 'KEEP' )
   END DO
@@ -500,7 +500,7 @@ SUBROUTINE elph_tetra_gamma()
   USE io_global, ONLY : stdout, ionode, ionode_id
   USE cell_base, ONLY : at, bg
   USE ions_base, ONLY : nat
-  USE symm_base, ONLY : s, irt, nsym, invs
+  USE symm_base, ONLY : s, irt, nsym, invs, t_rev
   USE klist,  ONLY: nks, nkstot
   USE wvfct, ONLY: et, nbnd
   USE qpoint, ONLY : xq, nksq, ikks
@@ -687,7 +687,7 @@ SUBROUTINE elph_tetra_gamma()
   elph_dir='elph_dir/'
   CALL create_directory( elph_dir )
   !
-  call star_q (xq, at, bg, nsym, s, invs, nq, sxq, isq, imq, .TRUE. )
+  call star_q1 (xq, at, bg, nsym, s, invs, nq, sxq, isq, imq, .TRUE. , t_rev)
   !
   DO isig = 1, el_ph_nsigma !=nsig in elphsum
      filelph = TRIM(elph_dir)//'a2Fq2r.'// TRIM(int_to_char(50 + isig)) &
@@ -720,7 +720,7 @@ SUBROUTINE elph_tetra_gamma()
      xmldyn_save=xmldyn
      xmldyn=.FALSE.
      CALL q2qstar_ph (dyn22, at, bg, nat, nsym, s, invs, &
-          irt, rtau, nq, sxq, isq, imq, iuelph)
+          irt, rtau, nq, sxq, isq, imq, iuelph, t_rev)
      xmldyn=xmldyn_save
      IF (ionode) CLOSE( UNIT = iuelph, STATUS = 'KEEP' )
   END DO

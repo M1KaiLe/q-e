@@ -7,7 +7,7 @@
 !
 !-----------------------------------------------------------------------
 subroutine rotate_and_add_dyn (phi, phi2, nat, isym, s, invs, irt, &
-     rtau, sxq)
+     rtau, sxq, antiunitary)
   !-----------------------------------------------------------------------
   !! Rotates a dynamical matrix (\(\text{phi}\)) in crystal coordinates
   !! according to the specified symmetry operation and add the rotated
@@ -27,6 +27,8 @@ subroutine rotate_and_add_dyn (phi, phi2, nat, isym, s, invs, irt, &
   !! index of the inverse operations
   integer :: irt(48,nat)
   !! index of the rotated atom
+  logical, intent(in) :: antiunitary
+  !! True when the operation includes time reversal (q' = -R q).
 
   complex(DP) :: phi(3,3,nat,nat)
   !! the input dyn.mat. in crystal coordinates
@@ -47,7 +49,7 @@ subroutine rotate_and_add_dyn (phi, phi2, nat, isym, s, invs, irt, &
   ! generic counters
   real(DP) :: arg
   ! argument of the phase
-  complex(DP) :: phase, work
+  complex(DP) :: phase, work, phi_block(3,3)
 
 
   ism1 = invs (isym)
@@ -59,12 +61,16 @@ subroutine rotate_and_add_dyn (phi, phi2, nat, isym, s, invs, irt, &
              + sxq (2) * (rtau (2, isym, na) - rtau (2, isym, nb) ) + sxq (3) &
              * (rtau (3, isym, na) - rtau (3, isym, nb) ) ) * tpi
         phase = CMPLX(cos (arg), - sin (arg) ,kind=DP)
+        ! sxq already includes the antiunitary minus sign. Conjugate only
+        ! the source matrix, not the phase evaluated at that target q.
+        phi_block = phi(:,:,na,nb)
+        IF (antiunitary) phi_block = CONJG(phi_block)
         do i = 1, 3
            do j = 1, 3
               work = CMPLX(0.d0, 0.d0,kind=DP)
               do k = 1, 3
                  do l = 1, 3
-                    work = work + s (i, k, ism1) * s (j, l, ism1) * phi (k, l, na, nb) &
+                    work = work + s (i, k, ism1) * s (j, l, ism1) * phi_block(k,l) &
                          * phase
                  enddo
               enddo

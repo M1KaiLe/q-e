@@ -132,7 +132,7 @@ SUBROUTINE phqscf
            !
            WRITE( stdout, '(/,5x,"Convergence has been achieved ")')
            done_irr (irr) = .TRUE.
-           IF (noncolin .AND. domag) THEN
+           IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
               WRITE(stdout,'(5x,A,I0,A,I0)') &
                    'DFPTU_NC_STAGE iq=', current_iq, ' after_convergence irr=', irr
               FLUSH(stdout)
@@ -142,14 +142,14 @@ SUBROUTINE phqscf
            CALL stop_smoothly_ph (.FALSE.)
         ENDIF
         rec_code=20
-        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A,I0)') &
                 'DFPTU_NC_STAGE iq=', current_iq, ' before_write_rec irr=', irr
            FLUSH(stdout)
         ENDIF
         CALL write_rec('done_drhod',irr,0.0_DP,-1000,.false.,npe,&
                         drhoscfs)
-        IF (lda_plus_u .AND. noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A,I0)') &
                 'DFPTU_NC_STAGE iq=', current_iq, ' after_write_rec irr=', irr
            FLUSH(stdout)
@@ -175,7 +175,7 @@ SUBROUTINE phqscf
      ! because it is needed for el-ph calculations
      !
      IF (ionode) THEN
-        IF (noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
              WRITE(stdout,'(5x,A,I0,A)') &
                   'DFPTU_NC_STAGE iq=', current_iq, ' before_write_dnsscf_file'
              FLUSH(stdout)
@@ -186,7 +186,7 @@ SUBROUTINE phqscf
                 &"spin_order=uu,ud,du,dd")') 2*Hubbard_lmax+1, nat, 3*nat
         ENDIF
         WRITE(iundnsscf,*) dnsscf_all_modes
-        IF (noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
             WRITE(stdout,'(5x,A,I0,A)') &
                  'DFPTU_NC_STAGE iq=', current_iq, ' after_write_dnsscf_file'
             FLUSH(stdout)
@@ -197,13 +197,13 @@ SUBROUTINE phqscf
      ! to the standard output
      !
      IF (iverbosity==1) THEN
-        IF (noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') &
                 'DFPTU_NC_STAGE iq=', current_iq, ' before_write_dnsscf_ph'
            FLUSH(stdout)
         ENDIF
         CALL write_dnsscf_ph()
-        IF (noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') &
                 'DFPTU_NC_STAGE iq=', current_iq, ' after_write_dnsscf_ph'
            FLUSH(stdout)
@@ -214,13 +214,13 @@ SUBROUTINE phqscf
      ! to the standard output
      !
      IF (iverbosity==1) THEN
-        IF (noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') &
                 'DFPTU_NC_STAGE iq=', current_iq, ' before_write_dynmat_hub'
            FLUSH(stdout)
         ENDIF
         CALL write_dynmat_hub()
-        IF (noncolin .AND. domag) THEN
+        IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
            WRITE(stdout,'(5x,A,I0,A)') &
                 'DFPTU_NC_STAGE iq=', current_iq, ' after_write_dynmat_hub'
            FLUSH(stdout)
@@ -229,7 +229,7 @@ SUBROUTINE phqscf
      !
      DEALLOCATE (dnsscf_all_modes)
      DEALLOCATE (dyn_hub_scf)
-     IF (noncolin .AND. domag) THEN
+     IF (lda_plus_u .AND. noncolin .AND. domag .AND. iverbosity > 0) THEN
         WRITE(stdout,'(5x,A,I0,A)') &
              'DFPTU_NC_STAGE iq=', current_iq, ' after_phqscf_deallocate'
         FLUSH(stdout)

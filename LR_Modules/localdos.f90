@@ -27,7 +27,7 @@ subroutine localdos (ldos, ldoss, becsum1, dos_ef)
   USE gvecs,            ONLY : doublegrid
   USE klist,            ONLY : xk, wk, ngk, igk_k, degauss, ngauss, ltetra
   USE lsda_mod,         ONLY : nspin, lsda, current_spin, isk
-  USE noncollin_module, ONLY : noncolin, npol, nspin_mag
+  USE noncollin_module, ONLY : noncolin, domag, npol, nspin_mag
   USE wvfct,            ONLY : nbnd, npwx, et
   USE becmod,           ONLY : calbec, bec_type, allocate_bec_type_acc, deallocate_bec_type_acc
   USE wavefunctions,    ONLY : evc, psic, psic_nc
@@ -112,7 +112,8 @@ subroutine localdos (ldos, ldoss, becsum1, dos_ef)
      !
      ! unperturbed wfs in reciprocal space read from unit iuwfc
      !
-     if (nksq > 1) then
+     ! A single physical k still has a time-reversed auxiliary spinor.
+     if (nksq > 1 .OR. (noncolin .AND. domag)) then
              call get_buffer (evc, lrwfc, iuwfc, ikks(ik))
 #if defined(__CUDA)
              evc_d = evc

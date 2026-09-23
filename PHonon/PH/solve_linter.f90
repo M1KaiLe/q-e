@@ -32,9 +32,13 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   !!    Phys. Rev. B 100, 045115 (2019).
   !! Step b, c, d are done inside sternheimer_kernel.
   !
+  USE ph_nc_response_conv, ONLY : nc_response_sums, nc_response_metric, nc_response_stop
+  USE fft_types, ONLY : fft_index_to_3d
+  USE, INTRINSIC :: ieee_arithmetic, ONLY : ieee_is_finite
   USE kinds,                ONLY : DP
   USE ions_base,            ONLY : nat, ityp
   USE io_global,            ONLY : stdout, ionode
+  USE control_flags,        ONLY : iverbosity
   USE io_files,             ONLY : prefix, diropn
   USE check_stop,           ONLY : check_stop_now
   USE wavefunctions,        ONLY : evc
@@ -138,6 +142,11 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   ! drhoc: response core charge density
   REAL(DP), allocatable :: becsum1(:,:,:), u_atom(:)
 
+  LOGICAL :: nc_conv_enabled, nc_convt, outside_grid
+  LOGICAL, ALLOCATABLE :: physical_grid(:)
+  INTEGER :: ir_grid, ix_grid, iy_grid, iz_grid
+  REAL(DP) :: nc_sums(3,2,npe), nc_rms(2,npe), nc_reference(2,npe), nc_scaled2(2,npe)
+  REAL(DP) :: nc_error2, nc_mix_error2, nc_nphysical
   LOGICAL :: all_conv, local_convt, hub_convt, inner_cg_convt, mix_hubbard_nc
   !! True if sternheimer_kernel is converged at all k points and perturbations
   logical :: exst,       & ! used to open the recover file
@@ -190,6 +199,29 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   ENDIF
   IF (mix_hubbard_nc .AND. nbgrp /= 1) CALL errore('solve_linter', &
        'nbgrp must be 1 for noncollinear DFPT+U joint mixing', 1)
+  nc_conv_enabled = noncolin .AND. domag .AND. .NOT.okvan .AND. &
+       .NOT.okpaw .AND. .NOT.lda_plus_u
+  IF (nc_conv_enabled) THEN
+     IF (.NOT.ieee_is_finite(tr2_ph) .OR. tr2_ph<=0.0_DP) &
+          CALL errore('solve_linter','tr2_ph must be finite and positive',1)
+     ALLOCATE(physical_grid(dfftp%nnr))
+     physical_grid=.FALSE.
+     DO ir_grid=1,dfftp%nr1x*dfftp%my_nr2p*dfftp%my_nr3p
+        CALL fft_index_to_3d(ir_grid,dfftp,ix_grid,iy_grid,iz_grid,outside_grid)
+        physical_grid(ir_grid)=.NOT.outside_grid
+     ENDDO
+     nc_nphysical=REAL(COUNT(physical_grid),DP)
+     CALL mp_sum(nc_nphysical,intra_bgrp_comm)
+     IF (ABS(nc_nphysical-REAL(dfftp%nr1,DP)*dfftp%nr2*dfftp%nr3)>0.5_DP) &
+          CALL errore('solve_linter','inconsistent physical FFT point count',1)
+     WRITE(stdout,'(5x,a)') 'Noncollinear magnetic response: V and B checked separately.'
+     WRITE(stdout,'(5x,a,es10.3)') 'Convergence target for max scaled residual^2 = ',tr2_ph
+     WRITE(stdout,'(5x,a)') 'Both Sternheimer branches must also converge.'
+     IF (iverbosity > 0) THEN
+        WRITE(stdout,'(5x,a,f15.0)') 'Physical FFT points = ',nc_nphysical
+        WRITE(stdout,'(5x,a)') 'RMS and reference in Ry/bohr; scaled^2 = [RMS / max(1, reference)]^2.'
+     ENDIF
+  ENDIF
   hub_convt = .TRUE.
   dr2_hub = 0.0_DP
 
@@ -435,12 +467,14 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
            thresh = min (1.d-1 * sqrt (dr2), 1.d-2)
         ENDIF
         !
+        ! Keep the final inner solve stricter than the requested outer tolerance.
+        IF (nc_conv_enabled) thresh=MIN(thresh,0.01_DP*SQRT(tr2_ph))
         ! Compute drhoscf, the charge density response to the total potential
         !
         CALL sternheimer_kernel(first_iter, isolv==2, npe, lrbar, iubar, &
             thresh, dvscfins, all_conv, averlt, drhoscf, dbecsum, &
             dbecsum_nc(:,:,:,:,:,isolv))
-        IF (mix_hubbard_nc) inner_cg_convt = inner_cg_convt .AND. all_conv
+        IF (mix_hubbard_nc .OR. nc_conv_enabled) inner_cg_convt = inner_cg_convt .AND. all_conv
         !
         !  reset the original magnetic field if it was changed
         !
@@ -462,7 +496,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         ENDIF
         !
      END DO ! isolv
-     IF (mix_hubbard_nc) THEN
+     IF (mix_hubbard_nc .OR. nc_conv_enabled) THEN
         inner_cg_failed = MERGE(0, 1, inner_cg_convt)
         CALL mp_max(inner_cg_failed, intra_image_comm)
         inner_cg_convt = inner_cg_failed == 0
@@ -675,6 +709,38 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         dr2_joint = MAX(dr2_local, dr2_hub * REAL(ndim_hub,DP) / &
              REAL(ndim_local,DP))
         dr2 = dr2_joint
+     ELSE IF (nc_conv_enabled) THEN
+        ! Unused FFT storage must not enter the Broyden history either.
+        DO ipert=1,npe
+           DO is=1,4
+              WHERE (.NOT.physical_grid)
+                 dvscfin(:,is,ipert)=(0.0_DP,0.0_DP)
+                 dvscfout(:,is,ipert)=(0.0_DP,0.0_DP)
+              END WHERE
+           ENDDO
+        ENDDO
+        CALL nc_response_sums(dfftp%nnr,npe,physical_grid,dvscfin,dvscfout,nc_sums)
+        CALL mp_sum(nc_sums,intra_bgrp_comm)
+        CALL nc_response_metric(nc_nphysical,npe,nc_sums,nc_error2,nc_rms,nc_reference,nc_scaled2)
+        CALL mp_max(nc_error2,intra_image_comm)
+        IF (nc_error2==HUGE(1.0_DP)) &
+             CALL errore('solve_linter','nonfinite NC response residual',1)
+        nc_convt=nc_response_stop(nc_error2,tr2_ph,inner_cg_convt)
+        convt=nc_convt
+        CALL check_all_convt(convt)
+        ! Preserve the Broyden method; replace only its stopping decision.
+        ! Its converged return leaves the input potential used for dpsi intact.
+        tr2_mix=-1.0_DP
+        IF (convt) tr2_mix=HUGE(1.0_DP)
+        iter_mix=iter
+        IF (my_pool_id==0) THEN
+           CALL mix_potential_with_comm(2*npe*dfftp%nnr*nspin_mag,dvscfout,dvscfin, &
+                alpha_mix(kter),nc_mix_error2,tr2_mix,iter_mix,nmix_ph,flmixdpot,convt,intra_bgrp_comm)
+        ENDIF
+        CALL mp_bcast(convt,root_pool,inter_pool_comm)
+        CALL mp_bcast(dvscfin,root_pool,inter_pool_comm)
+        convt=convt .AND. nc_convt
+        dr2=nc_error2
      ELSE IF (okpaw) THEN
         !
         !  In this case we mix also dbecsum
@@ -758,8 +824,22 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
 
      WRITE( stdout, '(/,5x," iter # ",i3," total cpu time :",f8.1, &
           &      " secs   av.it.: ",f5.1)') iter, tcpu, averlt
-     dr2 = dr2 / npe
-     IF (mix_hubbard_nc) THEN
+     IF (.NOT.nc_conv_enabled) dr2 = dr2 / npe
+     IF (nc_conv_enabled) THEN
+        WRITE(stdout,'(5x," thresh=",es10.3," alpha_mix = ",f6.3)') thresh,alpha_mix(kter)
+        WRITE(stdout,'(5x," response^2 = ",es10.3,"   Sternheimer: ",a)') &
+             dr2,TRIM(MERGE('converged    ','not converged',inner_cg_convt))
+        IF (iverbosity > 0) THEN
+           WRITE(stdout,'(/,7x,a)') 'Response residuals on the physical FFT grid'
+           WRITE(stdout,'(7x,a)') 'Pert.  Channel        RMS error       Reference        Scaled^2'
+           DO ipert=1,npe
+              WRITE(stdout,'(7x,i4,3x,a,5x,3es16.6)') ipert,'V', &
+                   nc_rms(1,ipert),nc_reference(1,ipert),nc_scaled2(1,ipert)
+              WRITE(stdout,'(7x,i4,3x,a,5x,3es16.6)') ipert,'B', &
+                   nc_rms(2,ipert),nc_reference(2,ipert),nc_scaled2(2,ipert)
+           ENDDO
+        ENDIF
+     ELSE IF (mix_hubbard_nc) THEN
         WRITE(stdout,'(5x," thresh=",es10.3," alpha_mix = ",f6.3, &
              &" |ddv_scf|^2 = ",es10.3)') thresh, alpha_mix(kter), &
              dr2_local/npe
@@ -767,20 +847,18 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
         WRITE(stdout,'(5x," thresh=",es10.3," alpha_mix = ",f6.3, &
              &" |ddv_scf|^2 = ",es10.3)') thresh, alpha_mix(kter), dr2
      ENDIF
-     IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,a,f8.4,a,es16.8,a,l1)') &
-          'DFPTU_NC_HUB_MIX iter=', iter, ' alpha=', alpha_mix(kter), &
-          ' residual=', dr2_hub, ' converged=', hub_convt
-     IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,a,l1)') &
-          'DFPTU_NC_INNER_CG iter=', iter, ' converged=', inner_cg_convt
-     IF (mix_hubbard_nc .AND. iter == 1) &
-          WRITE(stdout,'(5x,a,2(a,es16.8),2(a,i12))') &
-          'DFPTU_NC_CONV_THRESH', ' local=', tr2_local, &
-          ' hubbard=', tr2_hub, ' ndim_local=', ndim_local, &
-          ' ndim_hubbard=', ndim_hub
-     IF (mix_hubbard_nc) WRITE(stdout,'(5x,a,i4,3(a,es16.8),2(a,l1))') &
-          'DFPTU_NC_JOINT_MIX iter=', iter, ' local=', dr2_local, &
-          ' hubbard=', dr2_hub, ' joint=', dr2_joint, &
-          ' local_converged=', local_convt, ' hubbard_converged=', hub_convt
+     IF (mix_hubbard_nc) THEN
+        WRITE(stdout,'(5x," Hubbard residual^2 = ",es10.3,"   Sternheimer: ",a)') &
+             dr2_hub,TRIM(MERGE('converged    ','not converged',inner_cg_convt))
+        IF (iverbosity > 0) THEN
+           WRITE(stdout,'(/,7x,a)') 'DFPT+U joint mixing: channel       Residual^2          Target  Converged'
+           WRITE(stdout,'(7x,a,2es16.8,4x,l1)') '                     local  ',dr2_local,tr2_local,local_convt
+           WRITE(stdout,'(7x,a,2es16.8,4x,l1)') '                   Hubbard  ',dr2_hub,tr2_hub,hub_convt
+           WRITE(stdout,'(7x,a,es16.8)') 'Joint mixing residual^2 = ',dr2_joint
+           IF (iter == 1) WRITE(stdout,'(7x,a,i0,a,i0)') &
+                'Mixing dimensions: local = ',ndim_local,', Hubbard = ',ndim_hub
+        ENDIF
+     ENDIF
      !
      !    Here we save the information for recovering the run from this poin
      !
@@ -811,8 +889,16 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
      if (fildvscf.ne.' ') then
         do ipert = 1, npe
            if(lmetq0) then
-                dvscfin(:,:,ipert) = dvscfin(:,:,ipert)-def(ipert)
-                if (doublegrid) dvscfins(:,:,ipert) = dvscfins(:,:,ipert)-def(ipert)
+              ! A Fermi-energy shift multiplies the identity in spin space.
+              ! Noncollinear channels are (V, Bx, By, Bz), so shift only V.
+              ! Collinear channels are spin-up/down potentials: shift both.
+              IF (noncolin) THEN
+                 dvscfin(:,1,ipert) = dvscfin(:,1,ipert)-def(ipert)
+                 IF (doublegrid) dvscfins(:,1,ipert) = dvscfins(:,1,ipert)-def(ipert)
+              ELSE
+                 dvscfin(:,:,ipert) = dvscfin(:,:,ipert)-def(ipert)
+                 IF (doublegrid) dvscfins(:,:,ipert) = dvscfins(:,:,ipert)-def(ipert)
+              ENDIF
            endif
            call davcio_drho ( dvscfin(1,1,ipert),  lrdrho, iudvscf, imode0 + ipert, +1 )
            IF (okpaw.AND.ionode) CALL davcio( int3_paw(:,:,:,:,ipert), lint3paw, &
@@ -823,6 +909,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   endif
   if (convt.and.nlcc_any) call addnlcc (imode0, drhoscfh, npe)
   !
+  IF (ALLOCATED(physical_grid)) DEALLOCATE(physical_grid)
   CALL apply_dpot_deallocate()
   if (allocated(ldoss)) deallocate (ldoss)
   if (allocated(ldos)) deallocate (ldos)

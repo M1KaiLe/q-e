@@ -7,7 +7,7 @@
 !
 !-----------------------------------------------------------------------
 subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
-     nq, sxq, isq, imq, iudyn)
+     nq, sxq, isq, imq, iudyn, t_rev)
   !-----------------------------------------------------------------------
   !! Generates the dynamical matrices for the star of q and writes them on
   !! disk for later use.  
@@ -24,6 +24,8 @@ subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
   !! number of atoms in the unit cell
   integer :: nsym
   !! number of symmetry operations
+  integer, intent(in) :: t_rev(48)
+  !! Antiunitary flags in the same ordering used to generate sxq/isq.
   integer :: s(3,3,48)
   !! the symmetry operations
   integer :: invs(48)
@@ -64,6 +66,8 @@ subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
   !
   nsq = nsym / nq
   if (nsq * nq /= nsym) call errore ('q2star_ph', 'wrong degeneracy', 1)
+  IF (ANY(t_rev(1:nsym) < 0) .OR. ANY(t_rev(1:nsym) > 1)) &
+     CALL errore('q2qstar_ph', 'invalid antiunitary symmetry flags', 1)
   !
   ! Writes dyn.mat. dyn(3*nat,3*nat) on the 4-index array phi(3,3,nat,nat)
   !
@@ -78,7 +82,7 @@ subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
   enddo
   !
   ! If -q is in the list impose first of all the conditions coming from
-  ! time reversal symmetry
+  ! reality of the static real-space force constants
   !
   if (imq /= 0) then
      phi2 (:,:,:,:) = (0.d0, 0.d0)
@@ -87,7 +91,7 @@ subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
         isym = isym + 1
      enddo
      call rotate_and_add_dyn (phi, phi2, nat, isym, s, invs, irt, &
-          rtau, sxq (1, imq) )
+          rtau, sxq (1, imq), t_rev(isym)==1 )
      do na = 1, nat
         do nb = 1, nat
            do i = 1, 3
@@ -120,7 +124,7 @@ subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
      do isym = 1, nsym
         if (isq (isym) == iq) then
            call rotate_and_add_dyn (phi, phi2, nat, isym, s, invs, irt, &
-                rtau, sxq (1, iq) )
+                rtau, sxq (1, iq), t_rev(isym)==1 )
         endif
      enddo
      phi2 (:,:,:,:) = phi2 (:,:,:,:) / DBLE (nsq)
@@ -143,7 +147,7 @@ subroutine q2qstar_ph (dyn, at, bg, nat, nsym, s, invs, irt, rtau, &
      ENDIF
      if (imq == 0) then
         !
-        ! if -q is not in the star recovers its matrix by time reversal
+        ! If -q is not in the star, use the reality of static force constants.
         !
         do na = 1, nat
            do nb = 1, nat

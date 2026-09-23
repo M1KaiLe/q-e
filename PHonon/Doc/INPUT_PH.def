@@ -72,7 +72,30 @@ input_description -distribution {Quantum ESPRESSO} -package PHonon -program ph.x
 
         var tr2_ph   -type REAL { 
             default { 1e-12 }
-            info     { Threshold for self-consistency. }
+            info {
+                Threshold for self-consistency.
+
+                In this V2 build, for noncollinear magnetic calculations
+                with norm-conserving pseudopotentials and without Hubbard U,
+                this is the maximum squared scaled response-potential residual
+                over all perturbations. The scalar potential and the magnetic
+                vector are checked separately on physical FFT points; array
+                padding and the number of perturbations do not dilute it.
+
+                For each channel and normalized perturbation, let a be the
+                RMS of Vout-Vin and b=max(RMS(Vin),RMS(Vout)). The tested
+                quantity is (a/max(1,b))^2, with 1 in internal response-potential
+                units (Ry/bohr). For the magnetic channel, the three Cartesian
+                components are summed inside the RMS. Both Sternheimer
+                branches must also converge. No additional input is needed.
+
+                This residual tolerance is not a bound on frequency errors;
+                verify stability on tightening it for each system. Its numeric
+                meaning differs from the former array-length-normalized metric.
+                Recompute unconverged old response data in a fresh PH directory;
+                legacy recovery data are not validated for this change.
+                Other calculation paths keep their previous definition.
+            }
         }
 
         var alpha_mix(niter)  -type REAL { 
@@ -96,7 +119,20 @@ input_description -distribution {Quantum ESPRESSO} -package PHonon -program ph.x
         var verbosity -type CHARACTER { 
             default { 'default' }
             options {
-                info { Options are: }
+                info {
+                    Controls printed diagnostics only; convergence criteria and
+                    response data files do not depend on this setting.
+
+                    For noncollinear magnetic norm-conserving calculations
+                    without Hubbard U, short output reports the maximum scaled
+                    response residual squared and Sternheimer convergence.
+                    Verbose output also lists the scalar (V) and magnetic-vector
+                    (B) residuals and reference amplitudes for each perturbation.
+                    Noncollinear DFPT+U stage and matrix diagnostics are printed
+                    only in verbose output. Errors remain visible at all levels.
+
+                    Options are:
+                }
                 opt -val {'debug', 'high', 'medium'} { verbose output }
                 opt -val {'low', 'default', 'minimal'} { short output }
             }

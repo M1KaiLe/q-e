@@ -475,6 +475,7 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
   USE mp_pools,      ONLY : inter_pool_comm
   USE io_global,     ONLY : ionode, stdout
   USE hubbard_nc_response, ONLY : hubbard_qpair_inner_nc, hubbard_nc_diag_dyn
+  USE control_flags, ONLY : iverbosity
   !
   IMPLICIT NONE
   INTEGER, INTENT(IN) :: irr, nu_i0, nper
@@ -551,9 +552,9 @@ SUBROUTINE dynmat_hub_scf_nc(irr, nu_i0, nper)
      END DO
   END DO
   CALL mp_sum(dvhub_norm2, inter_pool_comm)
-  IF (ionode) WRITE(stdout,'(5x,"DFPTU_NC_DV iq=",i4," norm=",es16.8)') &
+  IF (ionode .AND. iverbosity > 0) WRITE(stdout,'(5x,"DFPTU_NC_DV iq=",i4," norm=",es16.8)') &
        current_iq, SQRT(dvhub_norm2)
-  CALL hubbard_nc_diag_dyn('scf', current_iq, dyn_hub_scf)
+  IF (iverbosity > 0) CALL hubbard_nc_diag_dyn('scf', current_iq, dyn_hub_scf)
   DEALLOCATE(dyn1,dvhub)
 END SUBROUTINE dynmat_hub_scf_nc
 !----------------------------------------------------------------------------

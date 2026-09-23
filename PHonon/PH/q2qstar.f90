@@ -31,7 +31,7 @@ PROGRAM Q2QSTAR
   ! symmetry
   USE symm_base,          ONLY : s, invs, nsym, find_sym, set_sym_bl, set_sym, &
                                  irt, copy_sym, nrot, inverse_s, no_t_rev, &
-                                 time_reversal
+                                 time_reversal, t_rev
   ! for reading the dyn.mat.
   USE cell_base,          ONLY : at, bg, celldm, ibrav, omega
   USE ions_base,          ONLY : nat, ityp, ntyp => nsp, atm, tau, amass
@@ -59,7 +59,7 @@ PROGRAM Q2QSTAR
   INTEGER       :: nqs, isq (48), imq, nqq
   REAL(DP)      :: sxq(3, 48), xq(3), xqs(3,48), epsilon(3,3)
   !
-  LOGICAL :: sym(48), lrigid, unitary_magnetic
+  LOGICAL :: sym(48), lrigid, unitary_magnetic, magnetic
   LOGICAL, EXTERNAL :: has_xml
   !
   COMPLEX(DP),ALLOCATABLE :: phi(:,:,:,:), d2(:,:)
@@ -98,6 +98,7 @@ PROGRAM Q2QSTAR
   CALL mp_bcast(unitary_magnetic, ionode_id, world_comm)
   !
   ! ######################### reading ######################### 
+  nspin_mag = 1
   XML_FORMAT_READ : &
   IF (xmldyn) THEN
     ! read params
@@ -159,16 +160,19 @@ PROGRAM Q2QSTAR
      m_loc = 0._DP
   ENDIF
   ! ~~~~~~~~ setup bravais lattice symmetry ~~~~~~~~ 
-  IF (unitary_magnetic) THEN
-     no_t_rev = .TRUE.
+  magnetic = xmldyn .AND. nspin_mag == 4 .AND. SUM(ABS(m_loc)) > 1.0e-12_DP
+  IF (magnetic .OR. unitary_magnetic) THEN
+     no_t_rev = unitary_magnetic
      CALL set_sym(nat, tau, ityp, nspin_mag, m_loc)
   ELSE
+     t_rev = 0
+     time_reversal = .TRUE.
      CALL set_sym_bl()
   ENDIF
   WRITE(stdout, '(5x,a,i3)') "Symmetries of bravais lattice: ", nrot
   !
   ! ~~~~~~~~ setup crystal symmetry ~~~~~~~~ 
-  IF (.NOT. unitary_magnetic) &
+  IF (.NOT. magnetic .AND. .NOT. unitary_magnetic) &
        CALL find_sym(nat, tau, ityp, .FALSE., m_loc)
   WRITE(stdout, '(5x,a,i3)') "Symmetries of crystal:         ", nsym
   !
@@ -205,7 +209,7 @@ PROGRAM Q2QSTAR
      enddo
   enddo
   !
-  CALL star_q(xq, at, bg, nsym, s, invs, nqs, sxq, isq, imq, .true. )
+  CALL star_q1(xq, at, bg, nsym, s, invs, nqs, sxq, isq, imq, .true., t_rev )
   !
   XML_FORMAT_WRITE : &
   IF (xmldyn) THEN
@@ -216,8 +220,13 @@ PROGRAM Q2QSTAR
 !              celldm, at, bg, omega, atm, amass, tau, ityp, m_loc, &
 !              nqq, epsilon, zstareu, lraman, ramtns)
 !      ELSE
-        CALL write_dyn_mat_header( filout, ntyp, nat, ibrav, nspin_mag, &
-             celldm, at, bg, omega, atm, amass, tau,ityp,m_loc,nqq)
+        IF (lrigid) THEN
+           CALL write_dyn_mat_header( filout, ntyp, nat, ibrav, nspin_mag, &
+                celldm, at, bg, omega, atm, amass, tau,ityp,m_loc,nqq,epsilon,zeu)
+        ELSE
+           CALL write_dyn_mat_header( filout, ntyp, nat, ibrav, nspin_mag, &
+                celldm, at, bg, omega, atm, amass, tau,ityp,m_loc,nqq)
+        ENDIF
 !      ENDIF
   ELSE XML_FORMAT_WRITE
       OPEN (unit=1, file=filout,status='unknown',form='formatted',iostat=ierr)
@@ -238,7 +247,7 @@ PROGRAM Q2QSTAR
   ENDDO
   !
   CALL q2qstar_ph (d2, at, bg, nat, nsym, s, invs, irt, rtau, &
-                   nqs, sxq, isq, imq, 1)
+                   nqs, sxq, isq, imq, 1, t_rev)
 
   IF (lrigid .and. .not. xmldyn ) call write_epsilon_and_zeu (zeu, epsilon, nat, 1)
 

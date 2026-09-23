@@ -1,0 +1,10 @@
+make: Entering directory '/public/home/huwj/QEP/q-e-qe-7.3.1-V2/LR_Modules/tests'
+./test_hubbard_nc_response.x
+explicit direct rotation maxerr=   1.1457E-13
+inverse pullback vs direct difference=   5.5673E+02
+     DFPTU_NC_QMAP_DIRECT iq=   0 nksq=     2 bad=   0 hash=         254
+       first=     1     2 last=     3     4
+     DFPTU_NC_QMAP iq=   0 nksq=     2 bad=   0 hash=         771
+       first=     1     2     5 last=     3     4     6
+PASS hubbard_nc_response
+make: Leaving directory '/public/home/huwj/QEP/q-e-qe-7.3.1-V2/LR_Modules/tests'

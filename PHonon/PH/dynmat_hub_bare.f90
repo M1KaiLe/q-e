@@ -615,6 +615,7 @@ SUBROUTINE dynmat_hub_bare_nc()
   !! from the second derivative of E_U=U/2 Tr[N-N^2].
   !
   USE kinds,         ONLY : DP
+  USE control_flags, ONLY : iverbosity
   USE ions_base,     ONLY : nat, ityp
   USE ldaU,          ONLY : Hubbard_lmax, Hubbard_l, Hubbard_U, offsetU, &
                             is_hubbard, nwfcU
@@ -778,7 +779,7 @@ SUBROUTINE dynmat_hub_bare_nc()
         dyn_hub_bare(imode,jmode) = dyn_hub_bare(imode,jmode) + work
      END DO
   END DO
-  CALL hubbard_nc_diag_dyn('bare', current_iq, dyn_hub_bare)
+  IF (iverbosity > 0) CALL hubbard_nc_diag_dyn('bare', current_iq, dyn_hub_bare)
   DEALLOCATE(dynwrk,d2n,proj,dproj,d2proj,dtmp,d2tmp)
 END SUBROUTINE dynmat_hub_bare_nc
 !----------------------------------------------------------------------------

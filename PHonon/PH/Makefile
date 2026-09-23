@@ -138,6 +138,7 @@ set_irr_sym.o \
 setlocq.o \
 solve_e.o \
 solve_e_fpol.o \
+ph_nc_response_conv.o \
 solve_linter.o \
 stop_ph.o \
 summarize.o \

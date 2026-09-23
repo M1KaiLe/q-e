@@ -798,14 +798,16 @@ SUBROUTINE phq_readin()
           ELSE
              WRITE(stdout,'(5x,a)') "Experimental nonmagnetic SOC DFPT+U (NC, U-only)"
           ENDIF
-          WRITE(stdout,'(5x,"DFPTU_NC_CAPS noncolin=",l1," lspinorb=",l1, &
-               &" domag=",l1," no_t_rev=",l1," nspin=",i2," npol=",i2, &
-               &" okvan=",l1," okpaw=",l1," projector=",a, &
-               &" Hubbard_lmax=",i2," J0_max=",es12.4)') noncolin, lspinorb, &
-               domag, no_t_rev, nspin, npol, okvan, okpaw, TRIM(Hubbard_projectors), &
-               Hubbard_lmax, MAXVAL(ABS(Hubbard_J0))
-          WRITE(stdout,'(5x,"DFPTU_NC_SYM nsym=",i3," antiunitary_count=",i3)') &
-               nsym, COUNT(t_rev(1:nsym) /= 0)
+          IF (iverbosity > 0) THEN
+             WRITE(stdout,'(5x,"DFPT+U: noncolin=",l1," lspinorb=",l1, &
+                  &" domag=",l1," no_t_rev=",l1)') noncolin,lspinorb,domag,no_t_rev
+             WRITE(stdout,'(7x,"nspin=",i2," npol=",i2," okvan=",l1," okpaw=",l1)') &
+                  nspin,npol,okvan,okpaw
+             WRITE(stdout,'(7x,"projector=",a," Hubbard_lmax=",i2," J0_max=",es12.4)') &
+                  TRIM(Hubbard_projectors),Hubbard_lmax,MAXVAL(ABS(Hubbard_J0))
+             WRITE(stdout,'(7x,"Symmetries: total=",i3," antiunitary=",i3)') &
+                  nsym,COUNT(t_rev(1:nsym) /= 0)
+          ENDIF
       ENDIF
      !
   ENDIF

@@ -288,8 +288,8 @@ CONTAINS
   !
   SUBROUTINE hubbard_nc_diag_matrix(tag, iq, branch, matrix)
     !! Print compact, ionode-only diagnostics for a 4-block Hubbard matrix.
-    !! The output is intentionally a single machine-readable line per call;
-    !! full matrices remain in the versioned response files.
+    !! Callers select verbose output; full matrices remain in the versioned
+    !! response files. Keep console diagnostics within a normal terminal width.
     USE io_global, ONLY : ionode, stdout
     CHARACTER(*), INTENT(IN) :: tag
     INTEGER, INTENT(IN) :: iq, branch
@@ -312,12 +312,12 @@ CONTAINS
                            matrix(:,:,hub_spin_du,:))**2))
     norm_my = SQRT(SUM(ABS(matrix(:,:,hub_spin_du,:) - &
                            matrix(:,:,hub_spin_ud,:))**2))
-    WRITE(stdout,'(5x,"DFPTU_NC_MATRIX tag=",a," iq=",i4," branch=",i2, &
-         &" norm=",es16.8," max=",es16.8)') TRIM(tag), iq, branch, &
+    WRITE(stdout,'(5x,"DFPTU_NC_MATRIX tag=",a," iq=",i4," branch=",i2,/, &
+         &7x,"norm=",es16.8," max=",es16.8)') TRIM(tag), iq, branch, &
          norm_total, norm_max
-    WRITE(stdout,'(5x,"DFPTU_NC_BLOCKS iq=",i4," branch=",i2, &
-         &" uu=",es16.8," ud=",es16.8," du=",es16.8," dd=",es16.8, &
-         &" charge=",es16.8," mz=",es16.8," mx=",es16.8," my=",es16.8)') &
+    WRITE(stdout,'(5x,"DFPTU_NC_BLOCKS iq=",i4," branch=",i2,/, &
+         &7x,"uu=",es16.8," ud=",es16.8,/,7x,"du=",es16.8," dd=",es16.8,/, &
+         &7x,"charge=",es16.8," mz=",es16.8,/,7x,"mx=",es16.8," my=",es16.8)') &
          iq, branch, norm_block(1), norm_block(2), norm_block(3), norm_block(4), &
          norm_charge, norm_mz, norm_mx, norm_my
   END SUBROUTINE hubbard_nc_diag_matrix
@@ -337,9 +337,9 @@ CONTAINS
     END DO
     norm_total = SQRT(SUM(ABS(matrix)**2))
     norm_max = MAXVAL(ABS(matrix))
-    WRITE(stdout,'(5x,"DFPTU_NC_RESPONSE tag=",a," iq=",i4," branch=",i2, &
-         &" norm=",es16.8," max=",es16.8," uu=",es16.8," ud=",es16.8, &
-         &" du=",es16.8," dd=",es16.8)') TRIM(tag), iq, branch, norm_total, &
+    WRITE(stdout,'(5x,"DFPTU_NC_RESPONSE tag=",a," iq=",i4," branch=",i2,/, &
+         &7x,"norm=",es16.8," max=",es16.8,/,7x,"uu=",es16.8," ud=",es16.8,/, &
+         &7x,"du=",es16.8," dd=",es16.8)') TRIM(tag), iq, branch, norm_total, &
          norm_max, norm_block(1), norm_block(2), norm_block(3), norm_block(4)
   END SUBROUTINE hubbard_nc_diag_response5
   !
@@ -358,9 +358,9 @@ CONTAINS
     END DO
     norm_total = SQRT(SUM(ABS(matrix)**2))
     norm_max = MAXVAL(ABS(matrix))
-    WRITE(stdout,'(5x,"DFPTU_NC_RESPONSE tag=",a," iq=",i4," branch=",i2, &
-         &" norm=",es16.8," max=",es16.8," uu=",es16.8," ud=",es16.8, &
-         &" du=",es16.8," dd=",es16.8)') TRIM(tag), iq, branch, norm_total, &
+    WRITE(stdout,'(5x,"DFPTU_NC_RESPONSE tag=",a," iq=",i4," branch=",i2,/, &
+         &7x,"norm=",es16.8," max=",es16.8,/,7x,"uu=",es16.8," ud=",es16.8,/, &
+         &7x,"du=",es16.8," dd=",es16.8)') TRIM(tag), iq, branch, norm_total, &
          norm_max, norm_block(1), norm_block(2), norm_block(3), norm_block(4)
   END SUBROUTINE hubbard_nc_diag_response6
   !
@@ -377,8 +377,8 @@ CONTAINS
     norm_max = MAXVAL(ABS(matrix))
     norm_herm = SQRT(SUM(ABS(matrix - CONJG(TRANSPOSE(matrix)))**2))
     rel_herm = norm_herm / MAX(1.0_DP, norm_total)
-    WRITE(stdout,'(5x,"DFPTU_NC_DYN tag=",a," iq=",i4," norm=",es16.8, &
-         &" max=",es16.8," herm_defect=",es16.8," rel_herm=",es16.8)') &
+    WRITE(stdout,'(5x,"DFPTU_NC_DYN tag=",a," iq=",i4,/,7x,"norm=",es16.8, &
+         &" max=",es16.8,/,7x,"herm_defect=",es16.8," rel_herm=",es16.8)') &
          TRIM(tag), iq, norm_total, norm_max, norm_herm, rel_herm
   END SUBROUTINE hubbard_nc_diag_dyn
   !
@@ -403,7 +403,7 @@ CONTAINS
                47_8*ikmks_in(ik), 2147483629_8)
        END DO
        WRITE(stdout,'(5x,"DFPTU_NC_QMAP iq=",i4," nksq=",i6," bad=",i4, &
-            &" hash=",i12," first=",3i6," last=",3i6)') iq, SIZE(ikks_in), bad, hash, &
+            &" hash=",i12,/,7x,"first=",3i6," last=",3i6)') iq, SIZE(ikks_in), bad, hash, &
             ikks_in(1), ikqs_in(1), ikmks_in(1), &
             ikks_in(SIZE(ikks_in)), ikqs_in(SIZE(ikqs_in)), ikmks_in(SIZE(ikmks_in))
     ELSE
@@ -412,7 +412,7 @@ CONTAINS
           hash = MOD(hash + 17_8*ikks_in(ik) + 31_8*ikqs_in(ik), 2147483629_8)
        END DO
        WRITE(stdout,'(5x,"DFPTU_NC_QMAP_DIRECT iq=",i4," nksq=",i6," bad=",i4, &
-            &" hash=",i12," first=",2i6," last=",2i6)') iq, SIZE(ikks_in), bad, hash, &
+            &" hash=",i12,/,7x,"first=",2i6," last=",2i6)') iq, SIZE(ikks_in), bad, hash, &
             ikks_in(1), ikqs_in(1), ikks_in(SIZE(ikks_in)), ikqs_in(SIZE(ikqs_in))
     ENDIF
   END SUBROUTINE hubbard_nc_diag_qmap

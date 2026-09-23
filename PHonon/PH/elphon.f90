@@ -716,7 +716,7 @@ SUBROUTINE elphsum ( )
   USE lsda_mod,    ONLY: isk, nspin
   USE klist,       ONLY: nks, nkstot, xk, wk, nelec
   USE start_k,     ONLY: nk1, nk2, nk3
-  USE symm_base,   ONLY: s, irt, nsym, invs
+  USE symm_base,   ONLY: s, irt, nsym, invs, t_rev
   USE noncollin_module, ONLY: nspin_lsda, nspin_mag
   USE wvfct,       ONLY: nbnd, et
   USE parameters,  ONLY : npk
@@ -1128,7 +1128,7 @@ SUBROUTINE elphsum ( )
   !
   !    Prepare interface to q2r and matdyn
   !
-  call star_q (xq, at, bg, nsym, s, invs, nq, sxq, isq, imq, .TRUE. )
+  call star_q1 (xq, at, bg, nsym, s, invs, nq, sxq, isq, imq, .TRUE. , t_rev)
   !
   do isig=1,el_ph_nsigma
      name=TRIM(elph_dir)//'a2Fq2r.'// TRIM(int_to_char(50 + isig)) &
@@ -1155,7 +1155,7 @@ SUBROUTINE elphsum ( )
      xmldyn_save=xmldyn
      xmldyn=.FALSE.
      call q2qstar_ph (dyn22, at, bg, nat, nsym, s, invs, &
-          irt, rtau, nq, sxq, isq, imq, iuelph)
+          irt, rtau, nq, sxq, isq, imq, iuelph, t_rev)
      xmldyn=xmldyn_save
      if (ionode) CLOSE( UNIT = iuelph, STATUS = 'KEEP' )
   enddo

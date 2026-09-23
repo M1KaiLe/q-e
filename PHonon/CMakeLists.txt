@@ -126,6 +126,7 @@ set(src_ph
     PH/setlocq.f90
     PH/solve_e.f90
     PH/solve_e_fpol.f90
+    PH/ph_nc_response_conv.f90
     PH/solve_linter.f90
     PH/stop_ph.f90
     PH/summarize.f90

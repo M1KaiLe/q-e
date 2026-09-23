@@ -1,5 +1,8 @@
 ![q-e-logo](logo.jpg)
 
+This branch includes NC/no-U magnetic DFPT fixes and paired Perturbo support.
+See [magnetic DFPT scope, tests and migration](README_MAGNETIC_DFPT.md).
+
 This is the distribution of the Quantum ESPRESSO suite of codes (ESPRESSO:
 opEn-Source Package for Research in Electronic Structure, Simulation, and
 Optimization)
