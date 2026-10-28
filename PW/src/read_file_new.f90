@@ -260,8 +260,8 @@ SUBROUTINE post_xml_init (  )
   USE control_flags,        ONLY : ts_vdw, tqr, tq_smoothing, tbeta_smoothing
   USE cellmd,               ONLY : cell_factor, lmovecell
   USE wvfct,                ONLY : nbnd, nbndx, et, wg
-  USE lsda_mod,             ONLY : nspin
-  USE noncollin_module,     ONLY : noncolin, lspinorb, domag
+  USE lsda_mod,             ONLY : nspin, starting_magnetization
+  USE noncollin_module,     ONLY : noncolin, lspinorb, domag, angle1, angle2, ux, lsign
   USE cell_base,            ONLY : at, bg, set_h_ainv
   USE symm_base,            ONLY : d1, d2, d3
   USE mp_bands,             ONLY : intra_bgrp_comm
@@ -271,15 +271,16 @@ SUBROUTINE post_xml_init (  )
   USE read_solv_module,     ONLY : read_solvents
   USE rism_module,          ONLY : rism_tobe_alive, rism_pot3d
   USE rism3d_facade,        ONLY : lrism3d, rism3d_initialize, rism3d_read_to_restart
-  USE xc_lib,               ONLY : xclib_dft_is_libxc, xclib_init_libxc
+  USE xc_lib,               ONLY : xclib_dft_is_libxc, xclib_init_libxc, xclib_dft_is
   USE beta_mod,             ONLY : init_tab_beta
   USE klist,                ONLY : qnorm
   !
   IMPLICIT NONE
   !
   REAL(DP) :: ehart, etxc, vtxc, etotefield, charge, qmax
+  REAL(DP) :: m_gga(3,nat)
   CHARACTER(LEN=37) :: dft_name
-  INTEGER :: ierr
+  INTEGER :: ierr, na
   !
   ! ... initialize Libxc if needed
   !
@@ -399,6 +400,21 @@ SUBROUTINE post_xml_init (  )
      CALL infomsg('read_file_new','*** vdW-TS term will be missing in potential ***')
      ts_vdw = .false.
   END IF
+  !
+  ! Restore the GGA spin-density projection used by PW before rebuilding
+  ! its Hamiltonian. PH and post-processing enter here without PW setup.
+  lsign = .FALSE.
+  ux = 0.0_DP
+  IF (noncolin .AND. xclib_dft_is('gradient')) THEN
+     DO na = 1, nat
+        m_gga(1,na) = starting_magnetization(ityp(na)) * &
+             SIN(angle1(ityp(na))) * COS(angle2(ityp(na)))
+        m_gga(2,na) = starting_magnetization(ityp(na)) * &
+             SIN(angle1(ityp(na))) * SIN(angle2(ityp(na)))
+        m_gga(3,na) = starting_magnetization(ityp(na)) * COS(angle1(ityp(na)))
+     END DO
+     CALL compute_ux(m_gga,ux,nat)
+  ENDIF
   !
   CALL v_of_rho( rho, rho_core, rhog_core, &
        ehart, etxc, vtxc, eth, etotefield, charge, v )

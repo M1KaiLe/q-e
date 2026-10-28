@@ -789,10 +789,8 @@ SUBROUTINE phq_readin()
              ANY(ABS(Hubbard_beta(:)) > 1.0D-12)) &
                CALL errore("phq_readin", &
                " Noncollinear DFPT+U supports Dudarev U only", 1)
-          IF (domag .AND. .NOT. no_t_rev) CALL errore("phq_readin", &
-               " Magnetic noncollinear DFPT+U requires no_t_rev=.true. in pw.x", 1)
-          IF (domag .AND. ANY(t_rev(1:nsym) /= 0)) CALL errore("phq_readin", &
-               " Magnetic noncollinear DFPT+U does not support antiunitary symmetries", 1)
+          IF (ANY(t_rev(1:nsym) < 0) .OR. ANY(t_rev(1:nsym) > 1)) &
+               CALL errore("phq_readin", " Invalid magnetic symmetry flags", 1)
           IF (domag) THEN
              WRITE(stdout,'(5x,a)') "Experimental noncollinear magnetic DFPT+U (NC, U-only)"
           ELSE

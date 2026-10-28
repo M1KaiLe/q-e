@@ -3,11 +3,44 @@
 Branch: `qe-7.3.1-dfpt-u-noncolin-magsym`.
 Use with [Perturbo 3.0.1-ALL](https://github.com/M1KaiLe/perturbo-github/tree/perturbo-3.0.1-ALL).
 
-This update retains antiunitary magnetic operations through the static DFPT
-dynamical-matrix export and the matching qe2pert/Perturbo workflow. Its new
-magnetic-group scope is **norm-conserving, no Hubbard U, LDA/GGA, noncollinear
-magnetism with SOC**. `no_t_rev=.true.` remains supported. Existing DFPT+U
-restrictions are retained; USPP/PAW and meta-GGA are not newly validated.
+The September release retained antiunitary magnetic operations through the
+static DFPT dynamical-matrix export and matching qe2pert/Perturbo workflow for
+**norm-conserving, no Hubbard U, LDA/GGA, noncollinear magnetism with SOC**.
+
+The October 27 update also implements antiunitary operations in the experimental
+noncollinear SOC+U response and ordinary qe2pert EPC path. Magnetic calculations
+no longer require `no_t_rev=.true.`; that unitary-only setting remains available.
+The +U scope is still norm-conserving, fully relativistic pseudopotentials,
+Dudarev U, `atomic` projectors, one Hubbard channel per species, and one band
+group. USPP/PAW, meta-GGA, general Hund couplings, recovery, and WFPT+U are not
+enabled by this change. See the
+[mathematical audit](PHonon/Doc/DFPTU_RELEASE_20261028.md) for conventions,
+tests, and the distinction between algebraic checks and material validation.
+The [October validation record](PHonon/Doc/DFPTU_RELEASE_20261028.md)
+reports the actual Fe group comparisons, EPC results, independent finite
+displacements, and remaining acceptance limits.
+The mathematical probes, Fe magnetic-group comparisons, and EPC comparisons
+pass. The initial PBE finite-displacement campaign had a 2.53% occupation-response
+error and force constants with opposite signs; those results are preserved in
+the historical record. The subsequent
+[response diagnosis](PHonon/Doc/DFPTU_RELEASE_20261028.md) repaired
+shared GGA/read-in defects and established independent energy, force and phonon
+agreement for PW92-LSDA SOC with and without U. For U=3 eV, the occupation-response
+error is 0.30893%, the force/PH difference is 0.06012%, and energy/force agreement
+is 0.07679%. The final production PH full/unitary comparison passes with complex
+dynamical-matrix and Cartesian Hubbard-response relative differences of
+1.09225e-5 and 6.13012e-6. The isolated PBE fixed-label control passes both
+steps' occupation and force checks, while its energy/force differences of
+9.30% and 3.56% fail acceptance. The default signed-PBE label rule remains
+non-smooth; fixed-label and solver candidates remain outside production.
+
+For +U EPC, export the ordinary PH `dvscf` and Hubbard responses, then use the
+paired qe2pert/Perturbo path. PH's built-in `electron_phonon` mode still rejects
++U. Metals use smearing, and response calculations start with `recover=.false.`.
+The [SOC+U release notes](PHonon/Doc/DFPTU_RELEASE_20261028.md)
+record the supported settings, multi-atom coverage and material validation.
+Generated calculation data and experimental builds are retained separately
+from this source release.
 
 ## Numerical changes
 
@@ -33,6 +66,18 @@ restrictions are retained; USPP/PAW and meta-GGA are not newly validated.
   numerical threshold does not imply the same accuracy.
 - Standard output prints compact iteration summaries. `verbosity='high'`
   enables per-perturbation residual diagnostics. No new required input exists.
+- Hubbard spinor response symmetrization conjugates the complete antiunitary
+  pullback, including the displacement matrix and translation phase. The spin
+  representation already includes the time-reversal spin factor; the separate
+  q/-q occupation relation uses the combined orbital-spin adjoint.
+- The nonlocal bare dynamical matrix reloads the direct spinor even when a pool
+  contains only one physical k point. Hubbard initialization can leave an
+  auxiliary time-reversed spinor in the shared wavefunction cache; reusing it
+  made the result depend severely on the pool count.
+- The shared GGA kernel applies the discrete FFT derivative to the projected
+  spin-density response, matching the SCF gradient operation.
+- Save-file readers restore the PW GGA spin axis before reconstructing the
+  potential, and initialize absent XML magnetization/angle fields explicitly.
 
 ## Build and small tests
 
@@ -46,6 +91,9 @@ and temporary I/O stubs. They do not require saved DFPT data:
 
 ```bash
 python PHonon/PH/tests/test_magnetic_response.py --fc gfortran
+python PHonon/PH/tests/test_hubbard_magnetic_symmetry.py
+python PHonon/PH/tests/test_dynmat_single_k.py
+python PHonon/PH/tests/test_hubbard_metal_weights.py
 make -C LR_Modules/tests check
 ```
 

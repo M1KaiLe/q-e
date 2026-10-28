@@ -257,8 +257,6 @@ CONTAINS
     COMPLEX(DP), INTENT(OUT) :: output(ldim,ldim,4,nat,npe)
     COMPLEX(DP) :: block_in(ldim,ldim,4), block_out(ldim,ldim,4)
     !
-    IF (t_rev(op) /= 0) CALL errore('sym_dns_nc', &
-         'antiunitary Hubbard-response symmetry is outside the supported scope', 1)
     output = (0.0_DP, 0.0_DP)
     DO ip = 1, npe
        DO na = 1, nat
@@ -301,6 +299,12 @@ CONTAINS
           END DO
        END DO
     END DO
+    ! d_spin_ldau already contains J U* for an antiunitary operation.
+    ! Its pullback is the complex conjugate of the complete unitary-form
+    ! expression above, including the translation phase and mode matrix.
+    ! A fixed-q response is not Hermitian: a transpose cannot replace this
+    ! conjugation.  The separate q/-q adjoint is applied by the caller.
+    IF (t_rev(op) == 1) output = CONJG(output)
   END SUBROUTINE rotate_dns_operation
   !
 END SUBROUTINE sym_dns_nc

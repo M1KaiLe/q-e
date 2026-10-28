@@ -29,7 +29,7 @@ SUBROUTINE dynmat_us()
   USE wavefunctions, ONLY : evc
   USE cell_base,            ONLY : omega, tpiba2
   USE uspp_param,           ONLY : nh, nhm
-  USE noncollin_module,     ONLY : noncolin, npol
+  USE noncollin_module,     ONLY : noncolin, domag, npol
   USE becmod,               ONLY : calbec, bec_type, allocate_bec_type, &
                                    deallocate_bec_type, beccopy
   USE modes,                ONLY : u
@@ -135,7 +135,11 @@ SUBROUTINE dynmat_us()
      ikk = ikks(ik)
      IF (lsda) current_spin = isk (ikk)
      npw = ngk(ikk)
-     IF (nksq > 1) CALL get_buffer (evc, lrwfc, iuwfc, ikk)
+     ! Hubbard initialization can leave the auxiliary time-reversed spinor
+     ! in evc.  Even a pool with one physical k point must reload its direct
+     ! state before contracting the second derivative of the nonlocal potential.
+     IF (nksq > 1 .OR. (noncolin .AND. domag)) &
+          CALL get_buffer (evc, lrwfc, iuwfc, ikk)
      CALL init_us_2 (npw, igk_k(1,ikk), xk (1, ikk), vkb)
      !
      !    We first prepare the gamma terms, which are the second derivatives

@@ -206,7 +206,7 @@ SUBROUTINE syme_dns_nc(ldim, npe, dns)
   dnr = dns
   !
   ! A static electric perturbation produces a Hermitian occupation response.
-  ! Enforce this before the unitary space-group average.
+  ! Enforce this before the magnetic space-group average.
   !
   DO ip = 1, npe
      CALL hubbard_adjoint_nc(ldim, nat, dnr(:,:,:,:,ip), adjoint)
@@ -215,8 +215,6 @@ SUBROUTINE syme_dns_nc(ldim, npe, dns)
   !
   dnraux = (0.0_DP, 0.0_DP)
   DO isym = 1, nsym
-     IF (t_rev(isym) /= 0) CALL errore('syme_dns_nc', &
-          'antiunitary electric-field symmetry is outside the supported scope', 1)
      DO ip = 1, npe
         DO na = 1, nat
            nt = ityp(na)
@@ -249,6 +247,11 @@ SUBROUTINE syme_dns_nc(ldim, npe, dns)
                    dorb(1:ldim_nt,1:ldim_nt), dspin_inv, &
                    block_in(1:ldim_nt,1:ldim_nt,:), &
                    block_out(1:ldim_nt,1:ldim_nt,:))
+              ! The antiunitary spin factor is already in d_spin_ldau.
+              ! Conjugating the pullback completes its semilinear action;
+              ! the electric-field rotation s is real and time-even.
+              IF (t_rev(isym) == 1) block_out(1:ldim_nt,1:ldim_nt,:) = &
+                   CONJG(block_out(1:ldim_nt,1:ldim_nt,:))
               dnraux(1:ldim_nt,1:ldim_nt,:,na,ip) = &
                    dnraux(1:ldim_nt,1:ldim_nt,:,na,ip) + &
                    s(ip,jp,isym) * block_out(1:ldim_nt,1:ldim_nt,:) / &

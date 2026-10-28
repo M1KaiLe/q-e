@@ -96,16 +96,19 @@ CONTAINS
           psfile(isp) = TRIM ( atomic_species%species(isp)%pseudo_file) 
        END IF
        IF ( PRESENT (starting_magnetization) ) THEN
+          starting_magnetization(isp) = 0.0_DP
           IF ( atomic_species%species(isp)%starting_magnetization_ispresent) THEN
              starting_magnetization(isp) = atomic_species%species(isp)%starting_magnetization
           END IF
        END IF
        IF ( PRESENT (angle1) ) THEN
+          angle1(isp) = 0.0_DP
           IF ( atomic_species%species(isp)%spin_teta_ispresent ) THEN 
              angle1(isp) =  atomic_species%species(isp)%spin_teta 
           END IF
        END IF
        IF ( PRESENT (angle2) ) THEN
+          angle2(isp) = 0.0_DP
           IF ( atomic_species%species(isp)%spin_phi_ispresent ) THEN
              angle2(isp) = atomic_species%species(isp)%spin_phi
           END IF
