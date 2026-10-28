@@ -50,6 +50,7 @@ SUBROUTINE dnsq_bare
   USE io_files,      ONLY : seqopn  
   USE buffers,       ONLY : get_buffer
   USE control_flags, ONLY : iverbosity
+  USE control_ph,    ONLY : current_iq
   USE wavefunctions, ONLY : evc  
   USE mp_images,     ONLY : intra_image_comm
   USE uspp_init,        ONLY : init_us_2
@@ -60,7 +61,8 @@ SUBROUTINE dnsq_bare
   !
   INTEGER :: i, j, k, icart, ios, is, na, nt, l, ih,        &
              ibeta, n, ihubst, ihubst1, ihubst2, nah, m, m1, m2,  &
-             ibnd, ldim, npw, npwq, ik, ikk, ikq, iundnsbare
+             ibnd, ldim, npw, npwq, ik, ikk, ikq, iundnsbare, ipattern
+  CHARACTER(LEN=6), EXTERNAL :: int_to_char
   COMPLEX(DP), ALLOCATABLE :: dqsphi(:,:), dmqsphi(:,:), dwfcatom_(:) 
   COMPLEX(DP), EXTERNAL :: ZDOTC
   LOGICAL :: exst
@@ -305,6 +307,16 @@ SUBROUTINE dnsq_bare
   ! in the pattern basis dnsbare_all_modes
   !
   CALL sym_dns_wrapper (ldim, dnsbare, dnsbare_all_modes) 
+  ! Export the same symmetrized pattern-basis tensor that PH uses below.
+  ! qe2pert combines it with dnsscf; the unsymmetrized Cartesian restart
+  ! file above is a different object and cannot be substituted for it.
+  IF (ionode) THEN
+     ipattern = 38
+     CALL seqopn(ipattern, 'dnsbare_pattern_q' // TRIM(int_to_char(current_iq)), 'formatted', exst)
+     WRITE(ipattern,*,IOSTAT=ios) dnsbare_all_modes
+     IF (ios /= 0) CALL errore('dnsq_bare', 'cannot write Hubbard bare response in pattern basis', ABS(ios))
+     CLOSE(ipattern,STATUS='keep')
+  ENDIF
   !
   ! Write symmetryzed dnsbare in cartesian coordinates 
   ! to the standard output

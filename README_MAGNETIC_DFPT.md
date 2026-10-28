@@ -12,8 +12,9 @@ noncollinear SOC+U response and ordinary qe2pert EPC path. Magnetic calculations
 no longer require `no_t_rev=.true.`; that unitary-only setting remains available.
 The +U scope is still norm-conserving, fully relativistic pseudopotentials,
 Dudarev U, `atomic` projectors, one Hubbard channel per species, and one band
-group. USPP/PAW, meta-GGA, general Hund couplings, recovery, and WFPT+U are not
-enabled by this change. See the
+group. USPP/PAW, meta-GGA, general Hund couplings and response recovery remain
+outside this scope. The October 28 [WFPT extension](https://github.com/M1KaiLe/perturbo-github/blob/perturbo-3.0.1-ALL/docs/WFPT_SPIN_U_20261028.md) adds
+scalar/collinear +U and noncollinear SOC+U through the paired Perturbo workflow. See the
 [mathematical audit](PHonon/Doc/DFPTU_RELEASE_20261028.md) for conventions,
 tests, and the distinction between algebraic checks and material validation.
 The [October validation record](PHonon/Doc/DFPTU_RELEASE_20261028.md)

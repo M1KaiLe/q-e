@@ -1,5 +1,10 @@
 # Magnetic noncollinear SOC+U release, 2026-10-28
 
+The later [WFPT spin/SOC/U extension](https://github.com/M1KaiLe/perturbo-github/blob/perturbo-3.0.1-ALL/docs/WFPT_SPIN_U_20261028.md) uses the same PH
+response export. This update also writes `prefix.dnsbare_pattern_qN` for
+scalar/collinear +U after `sym_dns_wrapper`; qe2pert reads it together with
+`prefix.dnsscf_qN`. Rebuild PH and regenerate these responses for that path.
+
 Use this QE branch with the matching
 [Perturbo 3.0.1-ALL branch](https://github.com/M1KaiLe/perturbo-github/tree/perturbo-3.0.1-ALL).
 
@@ -16,7 +21,7 @@ PH exports the dynamical matrices, ordinary `dvscf`, and Hubbard occupation
 responses. Ordinary qe2pert reconstructs the Hubbard contribution to EPC from
 these responses and the matching electronic/Wannier data. PH's built-in
 `electron_phonon` option remains unsupported with U; leave it unset.
-WFPT+U, USPP/PAW, U+V, independent Hund terms, ortho-atomic projectors and
+USPP/PAW, U+V, independent Hund terms, ortho-atomic projectors and
 meta-GGA phonons are outside this release's SOC+U scope.
 
 ## Changes
